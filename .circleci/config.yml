@@ -1,0 +1,21 @@
+version: 2
+jobs:
+  test:
+    docker:
+      - image: cimg/openjdk:8.0.322
+    steps:
+      - checkout
+      - restore_cache:
+          key: magicalmuggle-{{ checksum "pom.xml" }}
+      - run:
+          name: Run Maven verify
+          command: mvn clean verify -PmavenCentral
+      - save_cache: # saves the project dependencies
+          paths:
+            - ~/.m2
+          key: magicalmuggle-{{ checksum "pom.xml" }}
+workflows:
+  version: 2
+  default:
+    jobs:
+      - test
