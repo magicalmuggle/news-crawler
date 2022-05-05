@@ -18,7 +18,7 @@ public class JdbcCrawlerDao implements CrawlerDao {
             String userName = "root";
             String password = "root";
             connection = DriverManager.getConnection(
-                    "jdbc:h2:file:C:\\Users\\richa\\Projects\\news-crawler\\news", userName, password);
+                    "jdbc:h2:file:./news", userName, password);
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
@@ -55,7 +55,7 @@ public class JdbcCrawlerDao implements CrawlerDao {
     @Override
     public void insertNewsIntoDatabase(String url, String title, String content) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
-                "insert into news (url, title, content, created_at, MODIFIED_AT) values (?, ?, ?, now(), now())")) {
+                "insert into news (url, title, content) values (?, ?, ?)")) {
             statement.setString(1, url);
             statement.setString(2, title);
             statement.setString(3, content);
@@ -67,7 +67,7 @@ public class JdbcCrawlerDao implements CrawlerDao {
     public boolean isLinkProcessed(String link) throws SQLException {
         ResultSet resultSet = null;
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT LINK from LINKS_ALREADY_PROCESSED where link = ?")) {
+                "SELECT LINK from links_already_processed where link = ?")) {
             statement.setString(1, link);
             resultSet = statement.executeQuery();
             if (resultSet.next()) {
