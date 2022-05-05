@@ -30,28 +30,23 @@ public class Crawler {
                 continue;
             }
 
-            if (isRequiredLink(link)) {
-                System.out.println(link);
-                Document doc = httpGetAndParseHTML(link);
-                parseUrlsFromPageAndStoreIntoDatabase(doc);
-                storeIntoDatabaseIfItIsNewsPage(doc, link);
-                dao.updateDatabase(link, "insert into LINKS_ALREADY_PROCESSED (link) values (?)");
-            }
+            System.out.println(link);
+            Document doc = httpGetAndParseHTML(link);
+            parseUrlsFromPageAndStoreIntoDatabase(doc);
+            storeIntoDatabaseIfItIsNewsPage(doc, link);
+            dao.updateDatabase(link, "insert into LINKS_ALREADY_PROCESSED (link) values (?)");
         }
     }
 
     private void parseUrlsFromPageAndStoreIntoDatabase(Document doc) throws SQLException {
-
         Elements aTags = doc.select("a");
         for (Element aTag : aTags) {
             String link = aTag.attr("href");
-
-            if (link.startsWith("//")) {
-                link = "https:" + link;
-            }
-
-            if (!link.toLowerCase().startsWith("javascript")) {
-                dao.updateDatabase(link, "insert into LINKS_TO_BE_PROCESSED (link) values (?)");
+            if (isRequiredLink(link)) {
+                if (link.startsWith("//")) {
+                    link = "https:" + link;
+                }
+                dao.updateDatabase(link.replaceAll("\\s", ""), "insert into LINKS_TO_BE_PROCESSED (link) values (?)");
             }
         }
     }
@@ -59,16 +54,17 @@ public class Crawler {
     private void storeIntoDatabaseIfItIsNewsPage(Document doc, String link) throws SQLException {
         Elements articleTags = doc.select("article");
         if (!articleTags.isEmpty()) {
-            for (Element articleTag : articleTags) {
-                String title = articleTag.child(0).text();
-                String content = articleTag.select("p").stream().map(Element::text)
-                        .collect(Collectors.joining("\n"));
+            Element articleTag = articleTags.get(0);
+            String title = articleTag.child(0).text();
+            String content = articleTag.select("p").stream().map(Element::text)
+                    .collect(Collectors.joining("\n"));
+            if (!title.equals("") && !content.equals("")) {
                 dao.insertNewsIntoDatabase(link, title, content);
             }
         }
     }
 
-    private static Document httpGetAndParseHTML(String link) throws IOException, ParseException {
+    private Document httpGetAndParseHTML(String link) throws IOException, ParseException {
         try (CloseableHttpClient httpclient = HttpClients.createDefault()) {
             HttpGet httpGet = new HttpGet(link);
             httpGet.setHeader("user-agent",
@@ -83,15 +79,28 @@ public class Crawler {
         }
     }
 
-    private static boolean isRequiredLink(String link) {
-        return isIndexPage(link) || isNewsPage(link);
+    private boolean isRequiredLink(String link) {
+        return isSinaPageLink(link)
+                && isNotExcludedPageLink(link)
+                && isNotJavaScriptLink(link)
+                && isNotPhpLink(link);
     }
 
-    private static boolean isIndexPage(String link) {
-        return "https://sina.cn/".equals(link);
+    private boolean isSinaPageLink(String link) {
+        return link.contains("sina.cn");
     }
 
-    private static boolean isNewsPage(String link) {
-        return link.contains("//news.sina.cn");
+    private boolean isNotExcludedPageLink(String link) {
+        return !(link.contains("passport.sina.cn")
+                || link.contains("edu.sina.cn")
+                || link.contains("auto.sina.cn"));
+    }
+
+    private boolean isNotJavaScriptLink(String link) {
+        return !link.toLowerCase().startsWith("javascript");
+    }
+
+    private boolean isNotPhpLink(String link) {
+        return !link.contains(".php");
     }
 }
