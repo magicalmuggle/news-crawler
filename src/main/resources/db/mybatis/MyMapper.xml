@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.github.magicalmuggle.MyMapper">
+    <select id="selectNextLinkToBeProcessed" resultType="String">
+        select * from links_to_be_processed limit 1
+    </select>
+    <select id="countLinkAlreadyProcessed" resultType="Integer">
+        select count(link) from links_already_processed where link = #{link}
+    </select>
+    <delete id="deleteLinkToBeProcessed" parameterType="String">
+        delete from links_to_be_processed where link = #{link}
+    </delete>
+    <insert id="insertNews" parameterType="com.github.magicalmuggle.News">
+        insert into	news (url, title, content)
+        values (#{url}, #{title}, #{content})
+    </insert>
+    <insert id="insertLink">
+        insert into
+        ${tableName}
+        (link)
+        values #{link}
+    </insert>
+</mapper>
