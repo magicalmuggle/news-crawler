@@ -17,7 +17,7 @@ import java.sql.SQLException;
 import java.util.stream.Collectors;
 
 public class Crawler {
-    private final CrawlerDao dao = new JdbcCrawlerDao();
+    private final CrawlerDao dao = new MyBatisCrawlerDao();
 
     public static void main(String[] args) throws IOException, ParseException, SQLException {
         new Crawler().run();
@@ -25,7 +25,7 @@ public class Crawler {
 
     public void run() throws IOException, ParseException, SQLException {
         String link;
-        while ((link = dao.getNextLinkThenDelete("links_to_be_processed")) != null) {
+        while ((link = dao.getNextLinkThenDelete()) != null) {
             if (dao.isLinkProcessed(link)) {
                 continue;
             }
@@ -34,7 +34,7 @@ public class Crawler {
             Document doc = httpGetAndParseHTML(link);
             parseUrlsFromPageAndStoreIntoDatabase(doc);
             storeIntoDatabaseIfItIsNewsPage(doc, link);
-            dao.updateDatabase(link, "insert into links_already_processed (link) values (?)");
+            dao.insertLinkAlreadyProcessed(link);
         }
     }
 
@@ -46,7 +46,7 @@ public class Crawler {
                 if (link.startsWith("//")) {
                     link = "https:" + link;
                 }
-                dao.updateDatabase(link.replaceAll("\\s", ""), "insert into links_to_be_processed (link) values (?)");
+                dao.insertLinkToBeProcessed(link.replaceAll("\\s", ""));
             }
         }
     }
