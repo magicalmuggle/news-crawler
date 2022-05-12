@@ -18,7 +18,7 @@ public class JdbcCrawlerDao implements CrawlerDao {
             String userName = "root";
             String password = "root";
             connection = DriverManager.getConnection(
-                    "jdbc:h2:file:./news", userName, password);
+                    "jdbc:mysql://localhost:3306/news?characterEncoding=utf8", userName, password);
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }

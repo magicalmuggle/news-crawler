@@ -20,6 +20,6 @@
         insert into
         ${tableName}
         (link)
-        values #{link}
+        values (#{link})
     </insert>
 </mapper>
