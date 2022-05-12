@@ -35,7 +35,7 @@ public class JdbcCrawlerDao implements CrawlerDao {
     }
 
     @Override
-    public String getNextLinkThenDelete() throws SQLException {
+    public synchronized String getNextLinkThenDelete() throws SQLException {
         String link = getNextLink();
         if (link != null) {
             updateDatabase(link, "delete from links_to_be_processed where LINK = ?");

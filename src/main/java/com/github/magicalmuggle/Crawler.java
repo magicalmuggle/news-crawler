@@ -1,5 +1,6 @@
 package com.github.magicalmuggle;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
@@ -16,25 +17,31 @@ import java.io.IOException;
 import java.sql.SQLException;
 import java.util.stream.Collectors;
 
-public class Crawler {
-    private final CrawlerDao dao = new MyBatisCrawlerDao();
+public class Crawler extends Thread {
+    private final CrawlerDao dao;
 
-    public static void main(String[] args) throws IOException, ParseException, SQLException {
-        new Crawler().run();
+    @SuppressFBWarnings("EI_EXPOSE_REP2")
+    public Crawler(CrawlerDao dao) {
+        this.dao = dao;
     }
 
-    public void run() throws IOException, ParseException, SQLException {
-        String link;
-        while ((link = dao.getNextLinkThenDelete()) != null) {
-            if (dao.isLinkProcessed(link)) {
-                continue;
-            }
+    @Override
+    public void run() {
+        try {
+            String link;
+            while ((link = dao.getNextLinkThenDelete()) != null) {
+                if (dao.isLinkProcessed(link)) {
+                    continue;
+                }
 
-            System.out.println(link);
-            Document doc = httpGetAndParseHTML(link);
-            parseUrlsFromPageAndStoreIntoDatabase(doc);
-            storeIntoDatabaseIfItIsNewsPage(doc, link);
-            dao.insertLinkAlreadyProcessed(link);
+                System.out.println(link);
+                Document doc = httpGetAndParseHTML(link);
+                parseUrlsFromPageAndStoreIntoDatabase(doc);
+                storeIntoDatabaseIfItIsNewsPage(doc, link);
+                dao.insertLinkAlreadyProcessed(link);
+            }
+        } catch (SQLException | IOException | ParseException e) {
+            throw new RuntimeException(e);
         }
     }
 
