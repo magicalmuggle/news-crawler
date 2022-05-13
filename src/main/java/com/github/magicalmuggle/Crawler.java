@@ -33,7 +33,6 @@ public class Crawler extends Thread {
                 if (dao.isLinkProcessed(link)) {
                     continue;
                 }
-
                 System.out.println(link);
                 Document doc = httpGetAndParseHTML(link);
                 parseUrlsFromPageAndStoreIntoDatabase(doc);
@@ -41,6 +40,21 @@ public class Crawler extends Thread {
                 dao.insertLinkAlreadyProcessed(link);
             }
         } catch (SQLException | IOException | ParseException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public void crawlTheIndexPage() {
+        String indexLink = "https://sina.cn/";
+
+        try {
+            if (!dao.isLinkProcessed(indexLink)) {
+                System.out.println(indexLink);
+                Document doc = httpGetAndParseHTML(indexLink);
+                parseUrlsFromPageAndStoreIntoDatabase(doc);
+                dao.insertLinkAlreadyProcessed(indexLink);
+            }
+        } catch (IOException | ParseException | SQLException e) {
             throw new RuntimeException(e);
         }
     }
