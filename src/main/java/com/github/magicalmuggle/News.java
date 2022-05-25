@@ -1,14 +1,50 @@
 package com.github.magicalmuggle;
 
+import java.time.Instant;
+
 public class News {
     private String url;
     private String title;
     private String content;
+    private Instant createdAt;
+    private Instant modifiedAt;
+
+    public News(News old) {
+        this.url = old.url;
+        this.title = old.title;
+        this.content = old.content;
+        this.createdAt = old.createdAt;
+        this.modifiedAt = old.modifiedAt;
+    }
 
     public News(String url, String title, String content) {
         this.url = url;
         this.title = title;
         this.content = content;
+    }
+
+    public News(String url, String title, String content, Instant createdAt, Instant modifiedAt) {
+        this.url = url;
+        this.title = title;
+        this.content = content;
+        this.createdAt = createdAt;
+        this.modifiedAt = modifiedAt;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public Instant getModifiedAt() {
+        return modifiedAt;
+    }
+
+    public void setModifiedAt(Instant modifiedAt) {
+        this.modifiedAt = modifiedAt;
     }
 
     public String getUrl() {
