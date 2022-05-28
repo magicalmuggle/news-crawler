@@ -1,20 +1,16 @@
 package com.github.magicalmuggle;
 
-import org.apache.ibatis.io.Resources;
 import org.apache.ibatis.session.ExecutorType;
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
-import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.time.Instant;
 import java.util.List;
 import java.util.Random;
 
 public class MockDataGenerator {
     public static void main(String[] args) {
-        SqlSessionFactory sqlSessionFactory = getSqlSessionFactory();
+        SqlSessionFactory sqlSessionFactory = MybatisUtil.getSqlSessionFactory();
         mockData(sqlSessionFactory, 1_000_000);
     }
 
@@ -54,15 +50,5 @@ public class MockDataGenerator {
         newsToBeInserted.setCreatedAt(mockInstant);
         newsToBeInserted.setModifiedAt(mockInstant);
         return newsToBeInserted;
-    }
-
-    private static SqlSessionFactory getSqlSessionFactory() {
-        try {
-            String resource = "db/mybatis/config.xml";
-            InputStream inputStream = Resources.getResourceAsStream(resource);
-            return new SqlSessionFactoryBuilder().build(inputStream);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
     }
 }

@@ -2,18 +2,15 @@ package com.github.magicalmuggle;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
-import org.apache.ibatis.io.Resources;
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
-import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.List;
 
 public class ElasticsearchDataGenerator {
     public static void main(String[] args) {
-        SqlSessionFactory sqlSessionFactory = getSqlSessionFactory();
+        SqlSessionFactory sqlSessionFactory = MybatisUtil.getSqlSessionFactory();
         List<News> currentNewsList = getNewsFromMySQL(sqlSessionFactory);
         currentNewsList.forEach(news -> News.cutNewsContent(news, 10)); // 裁剪插入新闻的内容长度，从而节省硬盘空间
 
@@ -54,16 +51,6 @@ public class ElasticsearchDataGenerator {
         try (SqlSession session = sqlSessionFactory.openSession()) {
             MockMapper mapper = session.getMapper(MockMapper.class);
             return mapper.selectNews();
-        }
-    }
-
-    private static SqlSessionFactory getSqlSessionFactory() {
-        try {
-            String resource = "db/mybatis/config.xml";
-            InputStream inputStream = Resources.getResourceAsStream(resource);
-            return new SqlSessionFactoryBuilder().build(inputStream);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
         }
     }
 }
