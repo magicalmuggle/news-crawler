@@ -36,3 +36,4 @@ target/
 bin/
 
 *.db
+*.crt
