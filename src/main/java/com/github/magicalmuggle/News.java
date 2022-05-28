@@ -9,6 +9,9 @@ public class News {
     private Instant createdAt;
     private Instant modifiedAt;
 
+    public News() {
+    }
+
     public News(News old) {
         this.url = old.url;
         this.title = old.title;
@@ -69,5 +72,22 @@ public class News {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public static void cutNewsContent(News news, int length) {
+        if (news.getContent().length() > length) {
+            news.setContent(news.getContent().substring(0, length));
+        }
+    }
+
+    @Override
+    public String toString() {
+        return "News{" +
+                "url='" + url + '\'' +
+                ", title='" + title + '\'' +
+                ", content='" + content + '\'' +
+                ", createdAt=" + createdAt +
+                ", modifiedAt=" + modifiedAt +
+                '}';
     }
 }
