@@ -1,37 +1,37 @@
 # news-crawler
 
-English | [简体中文](https://github.com/magicalmuggle/news-crawler/blob/main/README_CN.md)
+[English](https://github.com/magicalmuggle/news-crawler/) | 简体中文
 
 [![GitHub license](https://img.shields.io/github/license/magicalmuggle/news-crawler)](https://github.com/magicalmuggle/news-crawler/blob/main/LICENSE)
 [![CircleCI](https://img.shields.io/circleci/build/github/magicalmuggle/news-crawler)](https://app.circleci.com/pipelines/github/magicalmuggle/news-crawler)
 
-This project is a multi-threaded news crawler that uses Elasticsearch as a search engine.
 
-## Preparation
+本项目是一个多线程新闻爬虫程序，使用 Elasticsearch 作为搜索引擎。
 
-1. Clone the project: 
+## 准备工作
+
+1. 克隆项目：
 ```shell
-# Change to the directory used to store the project
+# 切换到用来存储项目的目录
 cd ~/Projects/
 git clone https://github.com/magicalmuggle/news-crawler
 ```
 
-2. Use [Maven](https://maven.apache.org/) to install dependencies:
+2. 使用 [Maven](https://maven.apache.org/) 来安装依赖：
 ```shell
 cd ~/Projects/news-crawler/
 mvn install
 ```
 
-3. Use [Docker](https://www.docker.com/) to run [MySQL](https://www.mysql.com/):
-
+3. 使用 [Docker](https://www.docker.com/) 来运行 [MySQL](https://www.mysql.com/)：
 ```shell
-# Change to the directory used to persist the data
+# 切换到用来持久化数据的目录
 cd ~/Docker-Data/ && mkdir mysql-data
-# Remember to change the database password in the project
+# 记得修改项目中的数据库密码
 docker run --name mysql -p 3306:3306 -v ${PWD}/mysql-data:/var/lib/mysql -e MYSQL_ROOT_PASSWORD=my-secret-pw -d mysql:8
 ```
 
-4. Use [Flyway](https://flywaydb.org/) to migrate the database:
+4. 使用 [Flyway](https://flywaydb.org/) 来迁移数据库：
 ```shell
 mysql -u root -p
 mysql> create database news;
@@ -39,32 +39,32 @@ cd ~/Projects/news-crawler/
 mvn flyway:migrate
 ```
 
-5. Use [Docker](https://www.docker.com/) to run [Elasticsearch](https://www.elastic.co/):
+5. 使用 [Docker](https://www.docker.com/) 来运行 [Elasticsearch](https://www.elastic.co/)：
 ```shell
-# Change to the directory used to persist the data
+# 切换到用来持久化数据的目录
 cd ~/Docker-Data/ && mkdir es-data
 docker run -d --name es -p 9200:9200 -p 9300:9300 -v ${PWD}/es-data:/usr/share/elasticsearch/data -e "discovery.type=single-node" elasticsearch:8.2.1
-# Copy http_ca.crt to the project
+# 把 http_ca.crt 复制到项目
 docker cp es:/usr/share/elasticsearch/config/certs/http_ca.crt ~/Projects/new-crawler/
-# Generate password for user elastic
-# Remember to change the Elasticsearch password in the project.
+# 为用户 elastic 生成密码
+# 记得修改项目中的 Elasticsearch 密码
 docker exec -it es /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic
 ```
 
-## Usage
+## 用法
 
-Crawl news by running `com.github.magicalmuggle.Main`:
+运行 `com.github.magicalmuggle.Main` 来爬取新闻：
 
 [![Crawl-news.png](https://s1.ax1x.com/2022/05/28/XKwe4H.png)](https://imgtu.com/i/XKwe4H)
 
-Generate mock data for MySQL by running `com.github.magicalmuggle.MockDataGenerator`:
+运行 `com.github.magicalmuggle.MockDataGenerator` 来为 MySQL 生成模拟数据：
 
 [![Mock-data-for-MySQL.png](https://s1.ax1x.com/2022/05/28/XKBP0K.png)](https://imgtu.com/i/XKBP0K)
 
-Generate mock data for Elasticsearch by running `com.github.magicalmuggle.ElasticsearchDataGenerator`:
+运行 `com.github.magicalmuggle.ElasticsearchDataGenerator` 来为 Elasticsearch 生成模拟数据：
 
 [![Mock-data-for-Elasticsearch.png](https://s1.ax1x.com/2022/05/28/XKBRnx.png)](https://imgtu.com/i/XKBRnx)
 
-Search news by running `com.github.magicalmuggle.ElasticsearchEngine`:
+运行 `com.github.magicalmuggle.ElasticsearchEngine` 来搜索新闻：
 
 [![Search-news.png](https://s1.ax1x.com/2022/05/28/XK6me1.png)](https://imgtu.com/i/XK6me1)
