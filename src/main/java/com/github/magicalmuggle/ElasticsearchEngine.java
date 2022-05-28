@@ -28,7 +28,7 @@ public class ElasticsearchEngine {
             client = ElasticsearchUtil.getElasticsearchClient();
 
             SearchResponse<News> response = client.search(s -> s.index("news").query(
-                    q -> q.match(t -> t.field("content").query(keyword))), News.class);
+                    q -> q.match(t -> t.field("title").query(keyword))), News.class);
 
             response.hits().hits().forEach(x -> System.out.println(x.source()));
         } finally {
