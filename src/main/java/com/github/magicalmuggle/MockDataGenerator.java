@@ -10,7 +10,7 @@ import java.util.Random;
 
 public class MockDataGenerator {
     public static void main(String[] args) {
-        SqlSessionFactory sqlSessionFactory = MybatisUtil.getSqlSessionFactory();
+        SqlSessionFactory sqlSessionFactory = MyBatisUtil.getSqlSessionFactory();
         mockData(sqlSessionFactory, 1_000_000);
     }
 

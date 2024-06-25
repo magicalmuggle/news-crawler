@@ -10,7 +10,7 @@ import java.util.List;
 
 public class ElasticsearchDataGenerator {
     public static void main(String[] args) {
-        SqlSessionFactory sqlSessionFactory = MybatisUtil.getSqlSessionFactory();
+        SqlSessionFactory sqlSessionFactory = MyBatisUtil.getSqlSessionFactory();
         List<News> currentNewsList = getNewsFromMySQL(sqlSessionFactory);
         currentNewsList.forEach(news -> News.cutNewsContent(news, 10)); // 裁剪插入新闻的内容长度，从而节省硬盘空间
 
