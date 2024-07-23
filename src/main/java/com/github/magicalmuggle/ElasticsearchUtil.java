@@ -34,6 +34,9 @@ public class ElasticsearchUtil {
     private static final String PASSWORD = "your-password";
     private static final String FILE_PATH_OF_CA_CERTIFICATE = "./http_ca.crt";
 
+    private ElasticsearchUtil() {
+    }
+
     private static synchronized ElasticsearchClient makeHttpsConnection(
             String userName, String password, String filePathOfCaCertificate) throws
             CertificateException, IOException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException {
