@@ -79,7 +79,7 @@ public class Crawler extends Thread {
             String title = articleTag.child(0).text();
             String content = articleTag.select("p").stream().map(Element::text)
                     .collect(Collectors.joining("\n"));
-            if (!title.equals("") && !content.equals("")) {
+            if (!title.isEmpty() && !content.isEmpty()) {
                 dao.insertNewsIntoDatabase(link, title, content);
             }
         }
@@ -87,7 +87,7 @@ public class Crawler extends Thread {
 
     private Document httpGetAndParseHTML(String link) throws IOException, ParseException {
         try (CloseableHttpClient httpclient = HttpClients.createDefault()) {
-            HttpGet httpGet = new HttpGet(link);
+            HttpGet httpGet = new HttpGet(cleanUrl(link));
             httpGet.setHeader("user-agent",
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                             + "Chrome/100.0.4896.75 Safari/537.36");
@@ -98,6 +98,12 @@ public class Crawler extends Thread {
                 return Jsoup.parse(html);
             }
         }
+    }
+
+    private String cleanUrl(String url) {
+        url = url.replace("{", "");
+        url = url.replace("}", "");
+        return url;
     }
 
     private boolean isRequiredLink(String link) {
