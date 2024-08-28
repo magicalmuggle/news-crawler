@@ -3,7 +3,10 @@ package com.github.magicalmuggle;
 public class Main {
     public static void main(String[] args) {
         CrawlerDao dao = new MyBatisCrawlerDao();
-        int numOfThreads = 16;
+        int availableProcessors = Runtime.getRuntime().availableProcessors();
+        int numOfThreads = availableProcessors * 2;
+        System.out.println("availableProcessors = " + availableProcessors);
+        System.out.println("numOfThreads = " + numOfThreads);
 
         /*
         如果没有爬取过首页，那就在多线程运行之前爬取一次。
