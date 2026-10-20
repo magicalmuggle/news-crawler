@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>news-crawler 管理台</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">
+        <span class="brand-mark">N</span>
+        <span class="brand-name">news-crawler</span>
+        <span class="tag">只读管理台</span>
+    </div>
+    <div class="topbar-right">
+        <span id="clock" class="muted"></span>
+    </div>
+</header>
+
+<div class="layout">
+    <nav class="sidenav">
+        <a href="#/overview" data-route="overview">概览</a>
+        <a href="#/news" data-route="news">新闻数据</a>
+        <a href="#/links" data-route="links">链接队列</a>
+        <a href="#/logs" data-route="logs">日志</a>
+        <a href="#/settings" data-route="settings">环境自检</a>
+        <div class="sidenav-footer">
+            <p>P0 · 只读</p>
+            <p class="muted">无写入路径，不触发抓取</p>
+        </div>
+    </nav>
+    <main id="view" class="view" aria-live="polite"></main>
+</div>
+
+<dialog id="news-dialog" class="dialog">
+    <div class="dialog-head">
+        <h2 id="dialog-title">新闻详情</h2>
+        <button type="button" class="icon-button" id="dialog-close" aria-label="关闭">×</button>
+    </div>
+    <div id="dialog-body" class="dialog-body"></div>
+</dialog>
+
+<script src="/app.js"></script>
+</body>
+</html>

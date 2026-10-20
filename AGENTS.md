@@ -6,7 +6,8 @@
 ## 1. 项目概览
 
 多线程新闻爬虫：抓取新浪新闻（sina.cn）→ MySQL → 同步到 Elasticsearch 提供全文搜索。
-纯后端 CLI 项目，没有 Web 层，每个功能都是独立的 `main` 入口。
+以 CLI 为主，每个功能都是独立的 `main` 入口；另有一个只读 Web 管理界面
+（`com.github.magicalmuggle.web.AdminMain`，P0，不启动爬虫、不写库）。
 
 | 项目 | 值 |
 | --- | --- |
@@ -57,6 +58,7 @@ mvn flyway:migrate          # 执行数据库迁移（需要可用的 MySQL）
 | `com.github.magicalmuggle.ElasticsearchEngine` | 交互式搜索：循环读 stdin，按 `title` 做 match 查询 |
 | `com.github.magicalmuggle.ElasticsearchDataGenerator` | 把 MySQL 数据批量写入 Elasticsearch（16 线程 × 1000 次 bulk） |
 | `com.github.magicalmuggle.MockDataGenerator` | 生成/补足 100 万条模拟新闻（会写真实库，慎用） |
+| `com.github.magicalmuggle.web.AdminMain` | 只读 Web 管理界面：`--port` / `--bind`，不启动爬虫、不写库 |
 
 ## 3. 目录结构
 
@@ -76,10 +78,20 @@ src/main/java/com/github/magicalmuggle/
 ├── LocalConfig.java                # 本地数据库配置：环境变量 / local.properties / 默认值
 ├── MyBatisUtil.java                # SqlSessionFactory 工厂（供 Mock / ES 生成器使用）
 ├── MyMapper.java / MockMapper.java # MyBatis Mapper 接口
-├── News.java                       # 实体：url/title/content/createdAt/modifiedAt
+├── News.java                       # 实体：id/url/title/content/createdAt/modifiedAt
 ├── ElasticsearchUtil.java          # ES 客户端构造（HTTPS、证书、认证）
 ├── ElasticsearchEngine.java        # 搜索 CLI
 ├── ElasticsearchDataGenerator.java # MySQL → Elasticsearch
+├── web/                            # 只读 Web 管理界面（P0，无写路径）
+│   ├── AdminMain.java              # 入口：--port / --bind，默认 127.0.0.1:8080
+│   ├── AdminServer.java            # JDK HttpServer：路由、静态文件、错误处理
+│   ├── ApiRoutes.java              # 只读 API：overview/news/links/logs/health
+│   ├── AdminDao.java               # 只读查询（复用单例 SqlSessionFactory）
+│   ├── AdminMapper.java            # MyBatis Mapper 接口
+│   ├── NewsSummary.java            # 列表视图：不带正文，只带 contentLength
+│   ├── HealthChecker.java          # DB / ES / 证书 / Flyway 自检（缓存 5s）
+│   ├── LogTailer.java / LogEntry.java  # 日志解析、tail、SSE 增量推送
+│   └── ConfigReport.java           # crawler.* 生效值与来源
 └── MockDataGenerator.java          # 模拟数据生成
 
 src/main/resources/db/migration/V1__Create_tables.sql   # 三张表的建表脚本
@@ -87,6 +99,8 @@ src/main/resources/db/migration/V2__Add_indexes_to_link_tables.sql  # 两张链�
 src/main/resources/db/mybatis/config.xml                # 数据源 + Mapper 注册
 src/main/resources/db/mybatis/MyMapper.xml              # 爬虫用 SQL
 src/main/resources/db/mybatis/MockMapper.xml            # 模拟数据 / 导出用 SQL
+src/main/resources/db/mybatis/AdminMapper.xml           # 管理界面只读 SQL
+src/main/resources/web/                                 # 管理界面静态文件（index.html/app.js/style.css）
 src/main/resources/logback.xml                          # 日志：控制台 + 滚动文件
 src/test/java/com/github/magicalmuggle/SmokeTest.java   # 空测试
 src/test/java/com/github/magicalmuggle/FakeCrawlerDao.java         # 测试用 DAO 替身，不连数据库
@@ -176,8 +190,9 @@ sina.cn ──HTTP──> Crawler（多个线程）
   不连数据库：`CrawlerResilienceTest`（单条失败不影响线程）、`CrawlerBackoffTest`
   （429 不标记已处理、404 标记）、`CrawlThrottleTest`、`CircuitBreakerTest`、`CrawlConfigTest`。
   涉及退避的测试把 `retryBackoffMillis` 设成 1ms，别让它真的等几秒。
-  H2 依赖在 `pom.xml` 里，但 `config.xml` 指向真实 MySQL，H2 **不会**自动生效；
-  要写数据库相关测试，需要为测试单独提供数据源/建表脚本。
+  Web 层的测试用 H2（`src/test/resources/db/mybatis/config-h2.xml` + `H2TestSupport`）：
+  `AdminDaoTest` 验证只读 SQL，`AdminServerTest` 在随机端口上做端到端 HTTP 验证，都不连真实 MySQL。
+  注意 H2 只用于测试；应用运行时的 `config.xml` 仍指向真实 MySQL。
 
 ## 6. Elasticsearch 相关
 
@@ -225,6 +240,9 @@ sina.cn ──HTTP──> Crawler（多个线程）
 - 已忽略：`target/`、`.idea/`、`.vscode/`、`*.crt`、`*.db`、`local.properties`、`.mvn/maven.config`、`logs/`。
 - **不要随手运行 `Main`**：它会真实访问新浪并写数据库。只用编译、测试和静态检查验证改动。
 - **不要运行 `MockDataGenerator`**：它会向配置的数据库补数据到 100 万条。
+- **`AdminMain` 是只读的，默认监听 `127.0.0.1` 且没有认证**：不要绑定到公网地址，
+  也不要在其中加入写路径（启动爬虫、删除链接、重试失败链接都属于 P1/P2，需要单独评审）。
+  它只读 MySQL 与 `logs/crawler.log`，不会触发任何抓取。
 
 ## 9. 常见修改路径
 
@@ -238,6 +256,7 @@ sina.cn ──HTTP──> Crawler（多个线程）
 | 调整抓取速率 / 并发 / 单次页数上限 | `CrawlConfig`（键名 `crawler.*`）；速率逻辑在 `CrawlThrottle` |
 | 调整重试 / 熔断策略 | `Crawler.fetchWithRetry`、`Crawler.backoffMillis`、`CircuitBreaker` |
 | 调整线程模型 | `Main` + `MyBatisCrawlerDao.getNextLinkThenDelete` 的同步语义 |
+| 改 Web 管理界面 | `web/` 下的路由与页面；查询加在 `AdminMapper` / `AdminMapper.xml`（只读） |
 
 ## 10. 提交与 CI
 

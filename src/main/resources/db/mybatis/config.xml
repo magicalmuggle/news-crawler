@@ -20,5 +20,6 @@
     <mappers>
         <mapper resource="db/mybatis/MyMapper.xml"/>
         <mapper resource="db/mybatis/MockMapper.xml"/>
+        <mapper resource="db/mybatis/AdminMapper.xml"/>
     </mappers>
 </configuration>

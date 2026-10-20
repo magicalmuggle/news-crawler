@@ -1,8 +1,9 @@
 # Web UI 设计
 
-> 状态：设计草案，尚未实现。
+> 状态：P0（只读）已实现；P1（运行控制）与 P2（搜索 / 规则预览 / 失败重试）待做。
 > 范围：为现有爬虫增加一个 Web 管理界面，覆盖「观察 → 控制 → 检索」三层能力。
 > 前置阅读：[AGENTS.md](../AGENTS.md) 的「运行时架构」与「数据层约定」两节。
+> P0 的落地细节见文末「13. P0 实现说明」。
 
 ## 1. 背景
 
@@ -405,3 +406,44 @@ Java 8 这个约束把选项压窄了：Spring Boot 3 需要 Java 17。
 - 不做数据可视化的大屏
 - 不改抓取速率语义，不把线程数当作速率开关
 - 不把 CLI 入口删掉或改造，`Main` 保持可用
+
+## 13. P0 实现说明
+
+P0 已实现，入口是 `com.github.magicalmuggle.web.AdminMain`，默认监听 `127.0.0.1:8080`。
+它与 `Main` 完全独立：不启动爬虫、不写数据库，只读 MySQL 和 `logs/crawler.log`。
+
+### 13.1 代码位置
+
+| 文件 | 作用 |
+| --- | --- |
+| `web/AdminMain.java` | 入口：解析 `--port` / `--bind`，注册关停钩子 |
+| `web/AdminServer.java` | JDK 自带 `HttpServer`：路由、静态文件、错误处理、8 个工作线程 |
+| `web/ApiRoutes.java` | 所有只读 API |
+| `web/AdminDao.java` | 只读查询，`SqlSessionFactory` 只构造一次 |
+| `web/AdminMapper.java` + `db/mybatis/AdminMapper.xml` | 只读 SQL，与爬虫的 `MyMapper` 完全分开 |
+| `web/NewsSummary.java` | 列表视图：不带正文，只带 `contentLength` |
+| `web/HealthChecker.java` | DB / ES / 证书 / Flyway 自检，结果缓存 5 秒，ES 探测 4 秒超时 |
+| `web/LogTailer.java` + `web/LogEntry.java` | 日志尾部解析、按级别/关键字过滤、SSE 增量推送 |
+| `web/ConfigReport.java` | `crawler.*` 生效值与来源 |
+| `src/main/resources/web/` | `index.html` / `app.js` / `style.css`，无构建步骤 |
+
+### 13.2 与设计稿的差异
+
+1. **概览没有实时运行指标**。P0 不引入 RunManager，Web 进程看不到另一个进程里的 `CrawlSession`，
+   所以概览改为「数据视角」：新闻总数、今日新增、队列积压、最近入库时间、最近日志，
+   页面顶部有明确说明。实时进度、熔断状态、线程级 URL 属于 P1。
+2. **新闻列表用 `NewsSummary`**。列表不带正文，只带 `contentLength`；正文只在详情接口返回。
+   否则一页 50 条会把整篇文章都传给浏览器（实测单条正文可达数千字符）。
+3. **日志历史简化为「最近 N 行 + 过滤」**。没有做行号区间分页；`/api/logs` 从文件尾部最多读 2 MB。
+4. **队列页没有删除 / 清空**。P0 零写路径，这些操作留到后续版本并需要二次确认。
+5. **健康检查缓存 5 秒**，避免每次刷新页面都去 ping ES。
+6. **`News` 增加了 `id` 字段**，详情接口需要；对 ES 文档没有影响（该字段为空，不会进入 `_source` 语义）。
+
+### 13.3 校验方式
+
+- `mvn test`：29 个测试。`AdminServerTest` 用 H2 + JDK `HttpServer` 做端到端 HTTP 验证
+  （概览、列表、详情、404/405、静态文件、健康检查、SSE 日志推送），`AdminDaoTest` 覆盖只读 SQL。
+- 真实 MySQL 冒烟（手工执行、未提交测试代码）：`/api/overview`、`/api/news`、`/api/links/pending`、
+  `/api/health` 均返回 200；新闻列表不再携带正文；`char_length` 与 `limit ?` 在 MySQL 8.4 上工作正常。
+- `mvn clean verify` 需要在 JDK 8 下运行（SpotBugs 4.5.3 的限制，见 AGENTS.md），
+  已通过：29 个测试 + Checkstyle + SpotBugs。

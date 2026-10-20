@@ -3,6 +3,7 @@ package com.github.magicalmuggle;
 import java.time.Instant;
 
 public class News {
+    private Long id;
     private String url;
     private String title;
     private String content;
@@ -13,6 +14,7 @@ public class News {
     }
 
     public News(News old) {
+        this.id = old.id;
         this.url = old.url;
         this.title = old.title;
         this.content = old.content;
@@ -32,6 +34,14 @@ public class News {
         this.content = content;
         this.createdAt = createdAt;
         this.modifiedAt = modifiedAt;
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
     }
 
     public Instant getCreatedAt() {
@@ -83,7 +93,8 @@ public class News {
     @Override
     public String toString() {
         return "News{" +
-                "url='" + url + '\'' +
+                "id=" + id +
+                ", url='" + url + '\'' +
                 ", title='" + title + '\'' +
                 ", content='" + content + '\'' +
                 ", createdAt=" + createdAt +

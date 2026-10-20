@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- Web 管理界面的只读查询，所有语句都必须是 select -->
+<mapper namespace="com.github.magicalmuggle.web.AdminMapper">
+    <select id="countNews" resultType="java.lang.Long">
+        select count(*) from news
+    </select>
+
+    <select id="countNewsSince" resultType="java.lang.Long">
+        select count(*) from news where created_at &gt;= #{since}
+    </select>
+
+    <select id="latestNewsCreatedAt" resultType="java.time.Instant">
+        select max(created_at) from news
+    </select>
+
+    <select id="selectNewsById" resultType="com.github.magicalmuggle.News">
+        select id, url, title, content, created_at, modified_at
+        from news
+        where id = #{id}
+    </select>
+
+    <select id="selectNewsPage" resultType="com.github.magicalmuggle.web.NewsSummary">
+        select id, url, title, created_at, modified_at, char_length(content) as content_length
+        from news
+        <where>
+            <if test="beforeId != null">
+                id &lt; #{beforeId}
+            </if>
+            <if test="pattern != null and pattern != ''">
+                and title like #{pattern}
+            </if>
+        </where>
+        order by id desc
+        limit #{limit}
+    </select>
+
+    <select id="countLinksPending" resultType="java.lang.Long">
+        select count(*) from links_to_be_processed
+    </select>
+
+    <select id="selectPendingLinks" resultType="java.lang.String">
+        select link from links_to_be_processed order by id desc limit #{limit}
+    </select>
+
+    <select id="selectDuplicatePendingLinks" resultType="java.util.Map">
+        select link, count(*) as cnt
+        from links_to_be_processed
+        group by link
+        having count(*) &gt; 1
+        order by cnt desc, link
+        limit #{limit}
+    </select>
+
+    <select id="countLinksProcessed" resultType="java.lang.Long">
+        select count(*) from links_already_processed
+    </select>
+
+    <select id="selectProcessedLinks" resultType="java.lang.String">
+        select link
+        from links_already_processed
+        <where>
+            <if test="pattern != null and pattern != ''">
+                link like #{pattern}
+            </if>
+        </where>
+        order by id desc
+        limit #{limit}
+    </select>
+
+    <select id="ping" resultType="java.lang.Integer">
+        select 1
+    </select>
+
+    <select id="selectDatabaseName" resultType="java.lang.String">
+        select database()
+    </select>
+
+    <select id="selectDatabaseVersion" resultType="java.lang.String">
+        select version()
+    </select>
+
+    <select id="selectFlywayVersion" resultType="java.lang.String">
+        select version from flyway_schema_history order by installed_rank desc limit 1
+    </select>
+</mapper>
