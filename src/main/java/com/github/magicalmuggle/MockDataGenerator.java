@@ -3,12 +3,16 @@ package com.github.magicalmuggle;
 import org.apache.ibatis.session.ExecutorType;
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Random;
 
 public class MockDataGenerator {
+    private static final Logger LOG = LoggerFactory.getLogger(MockDataGenerator.class);
+
     public static void main(String[] args) {
         SqlSessionFactory sqlSessionFactory = MyBatisUtil.getSqlSessionFactory();
         mockData(sqlSessionFactory, 1_000_000);
@@ -23,8 +27,11 @@ public class MockDataGenerator {
             int count = howMany - countOfNews;
             Random random = new Random();
             try {
+                LOG.info("generating {} rows", Math.max(count, 0));
                 while (count-- > 0) {
-                    System.out.println("Left: " + count);
+                    if (count % 10_000 == 0) {
+                        LOG.info("remaining {}", count);
+                    }
 
                     News newsToBeInserted = getNewsToBeInserted(currentNewsList, random);
                     mapper.insertNews(newsToBeInserted);

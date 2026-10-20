@@ -1,12 +1,17 @@
 package com.github.magicalmuggle;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class Main {
+    private static final Logger LOG = LoggerFactory.getLogger(Main.class);
+
     public static void main(String[] args) {
         CrawlerDao dao = new MyBatisCrawlerDao();
         int availableProcessors = Runtime.getRuntime().availableProcessors();
         int numOfThreads = availableProcessors * 2;
-        System.out.println("availableProcessors = " + availableProcessors);
-        System.out.println("numOfThreads = " + numOfThreads);
+        LOG.info("availableProcessors = {}", availableProcessors);
+        LOG.info("numOfThreads = {}", numOfThreads);
 
         /*
         如果没有爬取过首页，那就在多线程运行之前爬取一次。

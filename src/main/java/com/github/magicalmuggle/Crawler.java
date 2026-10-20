@@ -13,12 +13,17 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.sql.SQLException;
 import java.util.stream.Collectors;
 
 public class Crawler extends Thread {
+    private static final Logger LOG = LoggerFactory.getLogger(Crawler.class);
+    private static final int MAX_LOGGED_URL_LENGTH = 300;
+
     private final CrawlerDao dao;
 
     @SuppressFBWarnings("EI_EXPOSE_REP2")
@@ -37,6 +42,7 @@ public class Crawler extends Thread {
                 processLink(link);
             }
         } catch (SQLException | PersistenceException e) {
+            LOG.error("database failure while reading the link queue", e);
             throw new RuntimeException(e);
         }
     }
@@ -46,29 +52,33 @@ public class Crawler extends Thread {
 
         try {
             if (!dao.isLinkProcessed(indexLink)) {
-                System.out.println(indexLink);
+                LOG.info("fetch {}", indexLink);
                 Document doc = httpGetAndParseHTML(indexLink);
                 parseUrlsFromPageAndStoreIntoDatabase(doc);
                 dao.insertLinkAlreadyProcessed(indexLink);
             }
         } catch (SQLException | PersistenceException e) {
+            LOG.error("database failure while crawling the index page", e);
             throw new RuntimeException(e);
         } catch (IOException | ParseException | RuntimeException e) {
-            System.out.println("[skip] " + indexLink + " <- " + e);
+            LOG.warn("skip {} <- {}", indexLink, e.toString());
+            LOG.debug("skip detail", e);
         }
     }
 
     private void processLink(String link) {
         try {
-            System.out.println(link);
+            LOG.info("fetch {}", abbreviate(link));
             Document doc = httpGetAndParseHTML(link);
             parseUrlsFromPageAndStoreIntoDatabase(doc);
             storeIntoDatabaseIfItIsNewsPage(doc, link);
             dao.insertLinkAlreadyProcessed(link);
         } catch (SQLException | PersistenceException e) {
+            LOG.error("database failure while processing {}", abbreviate(link), e);
             throw new RuntimeException(e);
         } catch (IOException | ParseException | RuntimeException e) {
-            System.out.println("[skip] " + link + " <- " + e);
+            LOG.warn("skip {} <- {}", abbreviate(link), e.toString());
+            LOG.debug("skip detail", e);
             markLinkAsProcessed(link);
         }
     }
@@ -77,8 +87,16 @@ public class Crawler extends Thread {
         try {
             dao.insertLinkAlreadyProcessed(link);
         } catch (SQLException | PersistenceException e) {
+            LOG.error("failed to mark {} as processed", abbreviate(link), e);
             throw new RuntimeException(e);
         }
+    }
+
+    private String abbreviate(String link) {
+        if (link.length() <= MAX_LOGGED_URL_LENGTH) {
+            return link;
+        }
+        return link.substring(0, MAX_LOGGED_URL_LENGTH) + "...";
     }
 
     private void parseUrlsFromPageAndStoreIntoDatabase(Document doc) throws SQLException {

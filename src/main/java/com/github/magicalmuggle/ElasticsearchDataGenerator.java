@@ -4,11 +4,15 @@ import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.List;
 
 public class ElasticsearchDataGenerator {
+    private static final Logger LOG = LoggerFactory.getLogger(ElasticsearchDataGenerator.class);
+
     public static void main(String[] args) {
         SqlSessionFactory sqlSessionFactory = MyBatisUtil.getSqlSessionFactory();
         List<News> currentNewsList = getNewsFromMySQL(sqlSessionFactory);
@@ -38,7 +42,9 @@ public class ElasticsearchDataGenerator {
                 }
                 client.bulk(BulkRequestBuilder.build());
 
-                System.out.println("Current thread: " + Thread.currentThread().getName() + " finishes " + i);
+                if (i % 100 == 0 || i == 999) {
+                    LOG.info("thread {} progress {}/1000", Thread.currentThread().getName(), i + 1);
+                }
             }
         } catch (IOException e) {
             throw new RuntimeException(e);

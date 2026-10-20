@@ -75,8 +75,10 @@ src/main/resources/db/migration/V1__Create_tables.sql   # 三张表的建表脚�
 src/main/resources/db/mybatis/config.xml                # 数据源 + Mapper 注册
 src/main/resources/db/mybatis/MyMapper.xml              # 爬虫用 SQL
 src/main/resources/db/mybatis/MockMapper.xml            # 模拟数据 / 导出用 SQL
+src/main/resources/logback.xml                          # 日志：控制台 + 滚动文件
 src/test/java/com/github/magicalmuggle/SmokeTest.java   # 空测试
 src/test/java/com/github/magicalmuggle/CrawlerResilienceTest.java  # 单条链接失败不影响线程
+src/test/resources/logback-test.xml                     # 测试日志：仅控制台
 .circleci/checkstyle.xml                                # Checkstyle 规则源文件
 ```
 
@@ -167,7 +169,9 @@ sina.cn ──HTTP──> Crawler（多个线程）
 - 没有配置行宽限制，也没有强制 Javadoc；现有代码几乎不写 Javadoc，新增代码保持同样密度即可。
 - SpotBugs 在 `verify` 阶段运行。确实无法避免时用 `@SuppressFBWarnings("...")`，
   参考 `Crawler` 构造器上的 `EI_EXPOSE_REP2` 写法。
-- 日志用 `System.out.println`，与现有代码一致（`slf4j-simple` 只是依赖传递，没有实际使用）。
+- 日志用 SLF4J + Logback（`src/main/resources/logback.xml`）：控制台 + `logs/crawler.log`
+  滚动文件，可用 `-DLOG_DIR=...` 改目录、`-DLOG_LEVEL=...` 改级别。交互式 CLI 输出
+  （`ElasticsearchEngine` 的提示和搜索结果）仍用 `System.out`，不要写进日志文件。
 - 中文注释可以接受，现有代码里就有。
 
 ## 8. 安全与本地环境（重要）
@@ -181,7 +185,7 @@ sina.cn ──HTTP──> Crawler（多个线程）
 - **仍有硬编码凭据**：`ElasticsearchUtil` 里的 ES 口令尚未外置，改动时不要提交真实值。
   - 提交前用 `git diff` / `git add -p` 逐块确认，别把口令带进提交历史。
   - 新代码、新文档、示例命令里**不要**写真实口令。
-- 已忽略：`target/`、`.idea/`、`.vscode/`、`*.crt`、`*.db`、`local.properties`、`.mvn/maven.config`。
+- 已忽略：`target/`、`.idea/`、`.vscode/`、`*.crt`、`*.db`、`local.properties`、`.mvn/maven.config`、`logs/`。
 - **不要随手运行 `Main`**：它会真实访问新浪并写数据库。只用编译、测试和静态检查验证改动。
 - **不要运行 `MockDataGenerator`**：它会向配置的数据库补数据到 100 万条。
 

@@ -44,3 +44,6 @@ bin/
 # Local development configuration (contains credentials, never commit)
 /local.properties
 /.mvn/maven.config
+
+# Runtime log files
+/logs/
