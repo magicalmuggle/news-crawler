@@ -137,6 +137,9 @@ async function renderOverview(root) {
             statCard('已处理链接', fmtNum(overview.links.processed), 'links_already_processed')),
         h('div', { class: 'split' },
             h('section', { class: 'panel' },
+                h('h2', { text: '最近日志' }),
+                h('div', { class: 'log-list preview' }, recentLogs.items.map(logRow))),
+            h('section', { class: 'panel' },
                 h('h2', { text: '最近入库' }),
                 h('dl', { class: 'kv' },
                     h('dt', { text: '最新时间' }),
@@ -144,10 +147,7 @@ async function renderOverview(root) {
                     h('dt', { text: '日志文件' }),
                     h('dd', { class: 'mono', text: overview.logFile }),
                     h('dt', { text: '生成时间' }),
-                    h('dd', { text: fmtTime(overview.generatedAt) }))),
-            h('section', { class: 'panel' },
-                h('h2', { text: '最近日志' }),
-                h('div', { class: 'log-list' }, recentLogs.items.map(logRow)))));
+                    h('dd', { text: fmtTime(overview.generatedAt) })))));
 
     if (recentLogs.items.length === 0) {
         root.querySelector('.log-list').append(h('div', { class: 'empty', text: '还没有日志，先去跑一次爬虫' }));

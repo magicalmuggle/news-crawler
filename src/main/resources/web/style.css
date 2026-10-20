@@ -128,8 +128,7 @@ body {
 .view {
     flex: 1;
     min-width: 0;
-    padding: 24px;
-    max-width: 1180px;
+    padding: 28px 32px 48px;
 }
 
 .page-head {
@@ -301,7 +300,7 @@ tr.clickable {
 }
 
 .title-cell {
-    max-width: 520px;
+    max-width: 900px;
 }
 
 .title-cell .title {
@@ -371,9 +370,14 @@ tr.clickable {
     overflow: auto;
 }
 
+/* 概览页只展示最近几条，不需要占满整屏 */
+.log-list.preview {
+    max-height: 420px;
+}
+
 .log-row {
     display: grid;
-    grid-template-columns: 150px 62px 90px 1fr;
+    grid-template-columns: 176px 58px 84px minmax(0, 1fr);
     gap: 10px;
     padding: 7px 8px;
     border-bottom: 1px solid #f0f1f3;
@@ -387,6 +391,10 @@ tr.clickable {
 .log-row .msg {
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+.log-row .time {
+    white-space: nowrap;
 }
 
 .log-row .time,
@@ -519,15 +527,17 @@ a.link:hover {
 
 .split {
     display: grid;
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
     gap: 16px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
     .split {
         grid-template-columns: 1fr;
     }
+}
 
+@media (max-width: 900px) {
     .sidenav {
         width: 150px;
     }
