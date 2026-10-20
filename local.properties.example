@@ -9,3 +9,14 @@
 db.url=jdbc:mysql://localhost:3306/news?characterEncoding=utf8
 db.username=root
 db.password=root
+
+# Crawler pacing, read by com.github.magicalmuggle.CrawlConfig from this same file.
+# Precedence: -Dcrawler.xxx system property > NEWS_CRAWLER_XXX environment variable
+# > this file > built-in defaults. Defaults: 3 threads, 1 request/second, 500 pages per run,
+# 3 retries with 5000ms exponential backoff, breaker after 10 consecutive 403/429/503.
+# crawler.threads=3
+# crawler.ratePerSecond=1.0
+# crawler.maxPages=500
+# crawler.maxRetries=3
+# crawler.retryBackoffMillis=5000
+# crawler.circuitBreakerThreshold=10

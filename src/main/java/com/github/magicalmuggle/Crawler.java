@@ -1,15 +1,7 @@
 package com.github.magicalmuggle;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-import org.apache.hc.client5.http.classic.methods.HttpGet;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
-import org.apache.hc.core5.http.HttpEntity;
-import org.apache.hc.core5.http.ParseException;
-import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.ibatis.exceptions.PersistenceException;
-import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
@@ -18,24 +10,31 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.sql.SQLException;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 public class Crawler extends Thread {
     private static final Logger LOG = LoggerFactory.getLogger(Crawler.class);
     private static final int MAX_LOGGED_URL_LENGTH = 300;
+    private static final long MAX_BACKOFF_MILLIS = TimeUnit.MINUTES.toMillis(2);
 
     private final CrawlerDao dao;
+    private final CrawlSession session;
 
     @SuppressFBWarnings("EI_EXPOSE_REP2")
-    public Crawler(CrawlerDao dao) {
+    public Crawler(CrawlerDao dao, CrawlSession session) {
         this.dao = dao;
+        this.session = session;
     }
 
     @Override
     public void run() {
         try {
-            String link;
-            while ((link = dao.getNextLinkThenDelete()) != null) {
+            while (session.shouldContinue()) {
+                String link = dao.getNextLinkThenDelete();
+                if (link == null) {
+                    break;
+                }
                 if (dao.isLinkProcessed(link)) {
                     continue;
                 }
@@ -51,35 +50,124 @@ public class Crawler extends Thread {
         String indexLink = "https://sina.cn/";
 
         try {
-            if (!dao.isLinkProcessed(indexLink)) {
-                LOG.info("fetch {}", indexLink);
-                Document doc = httpGetAndParseHTML(indexLink);
-                parseUrlsFromPageAndStoreIntoDatabase(doc);
+            if (dao.isLinkProcessed(indexLink)) {
+                return;
+            }
+            LOG.info("fetch index {}", indexLink);
+            FetchResult result = fetchWithRetry(indexLink);
+            if (result.getOutcome() == FetchResult.Outcome.OK) {
+                parseUrlsFromPageAndStoreIntoDatabase(result.getDocument());
                 dao.insertLinkAlreadyProcessed(indexLink);
+            } else {
+                LOG.warn("index page not fetched, status {}, the queue may stay empty", result.getStatusCode());
             }
         } catch (SQLException | PersistenceException e) {
             LOG.error("database failure while crawling the index page", e);
             throw new RuntimeException(e);
-        } catch (IOException | ParseException | RuntimeException e) {
+        } catch (RuntimeException e) {
             LOG.warn("skip {} <- {}", indexLink, e.toString());
             LOG.debug("skip detail", e);
         }
     }
 
     private void processLink(String link) {
+        if (!session.tryConsumePage()) {
+            return;
+        }
         try {
-            LOG.info("fetch {}", abbreviate(link));
-            Document doc = httpGetAndParseHTML(link);
-            parseUrlsFromPageAndStoreIntoDatabase(doc);
-            storeIntoDatabaseIfItIsNewsPage(doc, link);
-            dao.insertLinkAlreadyProcessed(link);
+            FetchResult result = fetchWithRetry(link);
+            switch (result.getOutcome()) {
+                case OK:
+                    parseUrlsFromPageAndStoreIntoDatabase(result.getDocument());
+                    storeIntoDatabaseIfItIsNewsPage(result.getDocument(), link);
+                    dao.insertLinkAlreadyProcessed(link);
+                    break;
+                case DEAD:
+                    LOG.info("drop dead link {} ({})", abbreviate(link), result.getStatusCode());
+                    dao.insertLinkAlreadyProcessed(link);
+                    break;
+                default:
+                    // 被拦或网络错误：不标记为已处理，下轮从首页重新发现时还有机会重爬。
+                    session.recordLinkDropped();
+                    break;
+            }
         } catch (SQLException | PersistenceException e) {
             LOG.error("database failure while processing {}", abbreviate(link), e);
             throw new RuntimeException(e);
-        } catch (IOException | ParseException | RuntimeException e) {
+        } catch (RuntimeException e) {
             LOG.warn("skip {} <- {}", abbreviate(link), e.toString());
             LOG.debug("skip detail", e);
             markLinkAsProcessed(link);
+        }
+    }
+
+    // 每次尝试前都过一遍全局限速；403/429/503 与传输错误按指数退避重试。
+    // 返回最后一次的结果，交给调用方决定是否标记已处理。
+    private FetchResult fetchWithRetry(String link) {
+        FetchResult last = null;
+        long waitMillis = 0L;
+        int maxAttempts = session.maxRetries() + 1;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            if (attempt > 1) {
+                sleepMillis(waitMillis);
+                if (Thread.currentThread().isInterrupted()) {
+                    break;
+                }
+            }
+            if (!session.shouldContinue()) {
+                break;
+            }
+            session.acquireSlot();
+            LOG.info("fetch {} (attempt {}/{})", abbreviate(link), attempt, maxAttempts);
+            try {
+                last = session.fetch(link);
+            } catch (IOException e) {
+                LOG.warn("transport error on {} <- {}", abbreviate(link), e.toString());
+                LOG.debug("transport error detail", e);
+                last = FetchResult.transientError(FetchResult.NO_STATUS);
+            }
+
+            switch (last.getOutcome()) {
+                case OK:
+                case DEAD:
+                    session.recordSuccessfulResponse();
+                    return last;
+                case RATE_LIMITED:
+                    session.recordBlockedResponse();
+                    LOG.warn("blocked with status {} on {} (attempt {}/{})", last.getStatusCode(),
+                            abbreviate(link), attempt, maxAttempts);
+                    waitMillis = Math.max(backoffMillis(attempt), last.getRetryAfterMillis());
+                    break;
+                default:
+                    waitMillis = backoffMillis(attempt);
+                    break;
+            }
+        }
+
+        if (last == null) {
+            last = FetchResult.transientError(FetchResult.NO_STATUS);
+        }
+        return last;
+    }
+
+    private long backoffMillis(int attempt) {
+        long base = Math.max(1L, session.retryBackoffMillis());
+        if (base >= MAX_BACKOFF_MILLIS) {
+            return MAX_BACKOFF_MILLIS;
+        }
+        long multiplier = 1L << Math.min(attempt - 1, 10);
+        return Math.min(base * multiplier, MAX_BACKOFF_MILLIS);
+    }
+
+    private void sleepMillis(long millis) {
+        if (millis <= 0L) {
+            return;
+        }
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -121,29 +209,9 @@ public class Crawler extends Thread {
                     .collect(Collectors.joining("\n"));
             if (!title.isEmpty() && !content.isEmpty()) {
                 dao.insertNewsIntoDatabase(link, title, content);
+                session.recordNewsStored();
             }
         }
-    }
-
-    private Document httpGetAndParseHTML(String link) throws IOException, ParseException {
-        try (CloseableHttpClient httpclient = HttpClients.createDefault()) {
-            HttpGet httpGet = new HttpGet(cleanUrl(link));
-            httpGet.setHeader("user-agent",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                            + "Chrome/100.0.4896.75 Safari/537.36");
-
-            try (CloseableHttpResponse response = httpclient.execute(httpGet)) {
-                HttpEntity entity = response.getEntity();
-                String html = EntityUtils.toString(entity);
-                return Jsoup.parse(html);
-            }
-        }
-    }
-
-    private String cleanUrl(String url) {
-        url = url.replace("{", "");
-        url = url.replace("}", "");
-        return url;
     }
 
     private boolean isRequiredLink(String link) {

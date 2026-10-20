@@ -7,10 +7,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -38,60 +35,31 @@ class CrawlerResilienceTest {
             String goodLink = "http://127.0.0.1:" + workingPort + "/news";
 
             FakeCrawlerDao dao = new FakeCrawlerDao(Arrays.asList(brokenLink, goodLink));
-            Crawler crawler = new Crawler(dao);
-            crawler.start();
-            crawler.join(10_000L);
+            try (CrawlSession session = new CrawlSession(testConfig())) {
+                Crawler crawler = new Crawler(dao, session);
+                crawler.start();
+                crawler.join(10_000L);
 
-            assertFalse(crawler.isAlive(), "crawler thread should finish");
-            assertTrue(dao.processedLinks.contains(brokenLink), "broken link should be marked as processed");
-            assertTrue(dao.processedLinks.contains(goodLink), "good link should be marked as processed");
-            assertEquals(1, dao.news.size());
-            assertEquals(goodLink, dao.news.get(0)[0]);
+                assertFalse(crawler.isAlive(), "crawler thread should finish");
+                assertFalse(dao.processedLinks.contains(brokenLink),
+                        "a link that failed at the transport level must stay retryable");
+                assertTrue(dao.processedLinks.contains(goodLink), "good link should be marked as processed");
+                assertEquals(1, dao.news.size());
+                assertEquals(goodLink, dao.news.get(0)[0]);
+                assertEquals(1, session.droppedLinks());
+            }
         } finally {
             server.stop(0);
         }
     }
 
+    private static CrawlConfig testConfig() {
+        return new CrawlConfig(1, 1000.0d, 10, 2, 1L, 10);
+    }
+
     private static int findClosedPort() throws Exception {
         try (ServerSocket socket = new ServerSocket(0)) {
             return socket.getLocalPort();
-        }
-    }
-
-    private static final class FakeCrawlerDao implements CrawlerDao {
-        private final List<String> queue;
-        private final List<String> processedLinks = Collections.synchronizedList(new ArrayList<String>());
-        private final List<String[]> news = Collections.synchronizedList(new ArrayList<String[]>());
-
-        private FakeCrawlerDao(List<String> queue) {
-            this.queue = new ArrayList<>(queue);
-        }
-
-        @Override
-        public synchronized String getNextLinkThenDelete() {
-            if (queue.isEmpty()) {
-                return null;
-            }
-            return queue.remove(0);
-        }
-
-        @Override
-        public void insertNewsIntoDatabase(String url, String title, String content) {
-            news.add(new String[]{url, title, content});
-        }
-
-        @Override
-        public boolean isLinkProcessed(String link) {
-            return processedLinks.contains(link);
-        }
-
-        @Override
-        public void insertLinkToBeProcessed(String link) {
-        }
-
-        @Override
-        public void insertLinkAlreadyProcessed(String link) {
-            processedLinks.add(link);
         }
     }
 }

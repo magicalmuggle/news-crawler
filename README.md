@@ -58,6 +58,12 @@ Crawl news by running `com.github.magicalmuggle.Main`:
 
 [![Crawl-news.png](https://s1.ax1x.com/2022/05/28/XKwe4H.png)](https://imgtu.com/i/XKwe4H)
 
+Crawling is deliberately slow by default: 3 threads, a global 1 request/second (with jitter),
+and at most 500 pages per run. Ten consecutive 403/429/503 responses trip a circuit breaker
+that stops the crawl. These values come from `CrawlConfig` and can be overridden with
+`-Dcrawler.ratePerSecond=0.5` style system properties, `NEWS_CRAWLER_*` environment variables,
+or `local.properties` (see `local.properties.example`).
+
 Generate mock data for MySQL by running `com.github.magicalmuggle.MockDataGenerator`:
 
 [![Mock-data-for-MySQL.png](https://s1.ax1x.com/2022/05/28/XKBP0K.png)](https://imgtu.com/i/XKBP0K)

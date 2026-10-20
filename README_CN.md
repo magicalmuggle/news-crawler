@@ -58,6 +58,11 @@ docker exec -it es /usr/share/elasticsearch/bin/elasticsearch-reset-password -u 
 
 [![Crawl-news.png](https://s1.ax1x.com/2022/05/28/XKwe4H.png)](https://imgtu.com/i/XKwe4H)
 
+默认抓取节奏比较保守：3 个线程、全局 1 请求/秒（带抖动）、单次最多 500 页；
+连续 10 次 403/429/503 会自动熔断停止。这些参数由 `CrawlConfig` 读取，
+可以用 `-Dcrawler.ratePerSecond=0.5` 之类的系统属性、`NEWS_CRAWLER_RATE_PER_SECOND`
+环境变量或 `local.properties` 覆盖（可配置项见 `local.properties.example`）。
+
 运行 `com.github.magicalmuggle.MockDataGenerator` 来为 MySQL 生成模拟数据：
 
 [![Mock-data-for-MySQL.png](https://s1.ax1x.com/2022/05/28/XKBP0K.png)](https://imgtu.com/i/XKBP0K)

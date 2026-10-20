@@ -27,11 +27,9 @@ public final class LocalConfig {
     private LocalConfig() {
     }
 
-    public static Properties loadDatabaseProperties() {
+    // 只读取 local.properties，不含任何默认值。CrawlConfig 等也复用这个方法。
+    public static Properties loadLocalProperties() {
         Properties properties = new Properties();
-        properties.setProperty(URL_KEY, DEFAULT_URL);
-        properties.setProperty(USERNAME_KEY, DEFAULT_USERNAME);
-        properties.setProperty(PASSWORD_KEY, DEFAULT_PASSWORD);
 
         Path configFile = resolveConfigFile();
         if (configFile != null) {
@@ -42,6 +40,14 @@ public final class LocalConfig {
                 throw new RuntimeException("Failed to load " + configFile, e);
             }
         }
+        return properties;
+    }
+
+    public static Properties loadDatabaseProperties() {
+        Properties properties = loadLocalProperties();
+        setDefault(properties, URL_KEY, DEFAULT_URL);
+        setDefault(properties, USERNAME_KEY, DEFAULT_USERNAME);
+        setDefault(properties, PASSWORD_KEY, DEFAULT_PASSWORD);
 
         overrideFromEnvironment(properties, URL_KEY, "NEWS_CRAWLER_DB_URL");
         overrideFromEnvironment(properties, USERNAME_KEY, "NEWS_CRAWLER_DB_USERNAME");
@@ -58,6 +64,12 @@ public final class LocalConfig {
             path = Paths.get(configuredPath);
         }
         return Files.isReadable(path) ? path : null;
+    }
+
+    private static void setDefault(Properties properties, String key, String value) {
+        if (properties.getProperty(key) == null) {
+            properties.setProperty(key, value);
+        }
     }
 
     private static void overrideFromEnvironment(Properties properties, String key, String environmentVariable) {
