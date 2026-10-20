@@ -1,0 +1,11 @@
+# Local development database settings. This file is git-ignored: never commit it.
+# Read by com.github.magicalmuggle.LocalConfig from the working directory.
+# Precedence: NEWS_CRAWLER_DB_URL / NEWS_CRAWLER_DB_USERNAME / NEWS_CRAWLER_DB_PASSWORD
+# environment variables > this file > built-in localhost defaults.
+# A different file location can be set with NEWS_CRAWLER_DB_CONFIG.
+#
+# Flyway does not read this file. For a non-default database run:
+#   mvn flyway:migrate -Ddb.url=... -Ddb.username=... -Ddb.password=...
+db.url=jdbc:mysql://localhost:3306/news?characterEncoding=utf8
+db.username=root
+db.password=root

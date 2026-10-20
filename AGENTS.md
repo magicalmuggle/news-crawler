@@ -62,6 +62,7 @@ src/main/java/com/github/magicalmuggle/
 ├── CrawlerDao.java                 # 数据访问接口
 ├── MyBatisCrawlerDao.java          # 当前使用的 DAO 实现
 ├── JdbcCrawlerDao.java             # 旧的 JDBC 实现，Main 已不使用
+├── LocalConfig.java                # 本地数据库配置：环境变量 / local.properties / 默认值
 ├── MyBatisUtil.java                # SqlSessionFactory 工厂（供 Mock / ES 生成器使用）
 ├── MyMapper.java / MockMapper.java # MyBatis Mapper 接口
 ├── News.java                       # 实体：url/title/content/createdAt/modifiedAt
@@ -167,11 +168,16 @@ sina.cn ──HTTP──> Crawler（多个线程）
 
 ## 8. 安全与本地环境（重要）
 
-- **仓库里有硬编码凭据**：`src/main/resources/db/mybatis/config.xml`、`pom.xml` 的 flyway 配置、
-  `ElasticsearchUtil`、`JdbcCrawlerDao`。本地开发时常被改成真实数据库地址和口令，**这类改动不要提交**。
+- **数据库配置**：`LocalConfig` 按优先级读取环境变量 `NEWS_CRAWLER_DB_URL` /
+  `NEWS_CRAWLER_DB_USERNAME` / `NEWS_CRAWLER_DB_PASSWORD` → 工作目录 `local.properties` →
+  内置 localhost 默认值。`local.properties` 已被 `.gitignore` 忽略（模板 `local.properties.example`），
+  本地切库、改口令只改它，**不要**再改 `config.xml`、`JdbcCrawlerDao`、`pom.xml`。
+- **Flyway**：`pom.xml` 使用 `${db.url}` / `${db.username}` / `${db.password}`，默认本机；
+  本地覆盖放 `.mvn/maven.config`（已忽略）或命令参数 `-Ddb.url=...`。
+- **仍有硬编码凭据**：`ElasticsearchUtil` 里的 ES 口令尚未外置，改动时不要提交真实值。
   - 提交前用 `git diff` / `git add -p` 逐块确认，别把口令带进提交历史。
-  - 新代码、新文档、示例命令里**不要**写真实口令；改到附近时优先抽成环境变量或外部配置。
-- 已忽略：`target/`、`.idea/`、`.vscode/`、`*.crt`、`*.db`。
+  - 新代码、新文档、示例命令里**不要**写真实口令。
+- 已忽略：`target/`、`.idea/`、`.vscode/`、`*.crt`、`*.db`、`local.properties`、`.mvn/maven.config`。
 - **不要随手运行 `Main`**：它会真实访问新浪并写数据库。只用编译、测试和静态检查验证改动。
 - **不要运行 `MockDataGenerator`**：它会向配置的数据库补数据到 100 万条。
 

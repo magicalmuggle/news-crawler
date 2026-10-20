@@ -40,3 +40,7 @@ bin/
 
 # VS Code
 .vscode/
+
+# Local development configuration (contains credentials, never commit)
+/local.properties
+/.mvn/maven.config

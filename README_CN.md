@@ -27,7 +27,7 @@ mvn install
 ```shell
 # 切换到用来持久化数据的目录
 cd ~/Docker-Data/ && mkdir mysql-data
-# 记得修改项目中的数据库密码
+# 把 local.properties.example 复制为 local.properties 并填写数据库地址和密码（该文件已被 .gitignore 忽略）
 docker run --name mysql -p 3306:3306 -v ${PWD}/mysql-data:/var/lib/mysql -e MYSQL_ROOT_PASSWORD=my-secret-pw -d mysql:8
 ```
 
@@ -37,6 +37,7 @@ mysql -u root -p
 mysql> create database news;
 cd ~/Projects/news-crawler/
 mvn flyway:migrate
+# 非默认数据库：mvn flyway:migrate -Ddb.url=... -Ddb.username=... -Ddb.password=...
 ```
 
 5. 使用 [Docker](https://www.docker.com/) 来运行 [Elasticsearch](https://www.elastic.co/)：

@@ -9,10 +9,9 @@ import java.io.InputStream;
 
 public class MyBatisUtil {
     public static SqlSessionFactory getSqlSessionFactory() {
-        try {
-            String resource = "db/mybatis/config.xml";
-            InputStream inputStream = Resources.getResourceAsStream(resource);
-            return new SqlSessionFactoryBuilder().build(inputStream);
+        String resource = "db/mybatis/config.xml";
+        try (InputStream inputStream = Resources.getResourceAsStream(resource)) {
+            return new SqlSessionFactoryBuilder().build(inputStream, LocalConfig.loadDatabaseProperties());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

@@ -27,7 +27,7 @@ mvn install
 ```shell
 # Change to the directory used to persist the data
 cd ~/Docker-Data/ && mkdir mysql-data
-# Remember to change the database password in the project
+# Copy local.properties.example to local.properties and fill in the database url/password (git-ignored)
 docker run --name mysql -p 3306:3306 -v ${PWD}/mysql-data:/var/lib/mysql -e MYSQL_ROOT_PASSWORD=my-secret-pw -d mysql:8
 ```
 
@@ -37,6 +37,7 @@ mysql -u root -p
 mysql> create database news;
 cd ~/Projects/news-crawler/
 mvn flyway:migrate
+# Non-default database: mvn flyway:migrate -Ddb.url=... -Ddb.username=... -Ddb.password=...
 ```
 
 5. Use [Docker](https://www.docker.com/) to run [Elasticsearch](https://www.elastic.co/):

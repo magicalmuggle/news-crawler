@@ -1,24 +1,23 @@
 package com.github.magicalmuggle;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Properties;
 
 public class JdbcCrawlerDao implements CrawlerDao {
 
     private final Connection connection;
 
-    @SuppressFBWarnings("DMI_CONSTANT_DB_PASSWORD")
     public JdbcCrawlerDao() {
         try {
-            String userName = "root";
-            String password = "root";
+            Properties properties = LocalConfig.loadDatabaseProperties();
             connection = DriverManager.getConnection(
-                    "jdbc:mysql://localhost:3306/news?characterEncoding=utf8", userName, password);
+                    properties.getProperty(LocalConfig.URL_KEY),
+                    properties.getProperty(LocalConfig.USERNAME_KEY),
+                    properties.getProperty(LocalConfig.PASSWORD_KEY));
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }

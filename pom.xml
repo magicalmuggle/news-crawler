@@ -10,6 +10,10 @@
         <maven.compiler.source>1.8</maven.compiler.source>
         <maven.compiler.target>1.8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- 数据库默认连接本机；本地覆盖用 -Ddb.url=... 或 .mvn/maven.config（已忽略，不会提交） -->
+        <db.url>jdbc:mysql://localhost:3306/news?characterEncoding=utf8</db.url>
+        <db.username>root</db.username>
+        <db.password>root</db.password>
     </properties>
 
     <profiles>
@@ -183,9 +187,9 @@
                 <artifactId>flyway-maven-plugin</artifactId>
                 <version>8.5.10</version>
                 <configuration>
-                    <url>jdbc:mysql://localhost/news?characterEncoding=utf-8</url>
-                    <user>root</user>
-                    <password>root</password>
+                    <url>${db.url}</url>
+                    <user>${db.username}</user>
+                    <password>${db.password}</password>
                 </configuration>
             </plugin>
         </plugins>
