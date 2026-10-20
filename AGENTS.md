@@ -75,7 +75,8 @@ src/main/resources/db/migration/V1__Create_tables.sql   # 三张表的建表脚�
 src/main/resources/db/mybatis/config.xml                # 数据源 + Mapper 注册
 src/main/resources/db/mybatis/MyMapper.xml              # 爬虫用 SQL
 src/main/resources/db/mybatis/MockMapper.xml            # 模拟数据 / 导出用 SQL
-src/test/java/com/github/magicalmuggle/SmokeTest.java   # 唯一的测试，目前为空实现
+src/test/java/com/github/magicalmuggle/SmokeTest.java   # 空测试
+src/test/java/com/github/magicalmuggle/CrawlerResilienceTest.java  # 单条链接失败不影响线程
 .circleci/checkstyle.xml                                # Checkstyle 规则源文件
 ```
 
@@ -101,7 +102,9 @@ sina.cn ──HTTP──> Crawler（多个线程）
    所有 `<p>` 拼接作 content，两者都非空才写 `news` 表。
 6. `dao.insertLinkAlreadyProcessed(link)`：标记已处理。
 
-线程内所有受检异常统一包成 `RuntimeException` 抛出，**线程会直接终止**；排查时先看第一条堆栈。
+- 单条链接的 HTTP/TLS/解析失败只跳过该链接：打印 `[skip] <url> <- <异常>` 并写入已处理表，线程继续；
+  数据库异常（`SQLException` / `PersistenceException`）仍包成 `RuntimeException` 抛出，**线程会终止**。
+  排查时先看第一条堆栈。
 
 ### 链接过滤规则（`Crawler.isRequiredLink`）
 
@@ -136,8 +139,9 @@ sina.cn ──HTTP──> Crawler（多个线程）
   （`links_to_be_processed` / `links_already_processed`），**绝不要传外部输入**（SQL 注入）。
 - `MockMapper.selectNews` 固定 `limit 1000`；`ElasticsearchDataGenerator` 会把这个结果集
   重复写入 1000 次，所以「1000 条 × 16 线程 × 1000 批」≈ 1600 万文档，别在生产 ES 上试。
-- 测试现状：`SmokeTest` 是空测试；H2 依赖在 `pom.xml` 里，但 `config.xml` 指向真实 MySQL，
-  H2 **不会**自动生效。要写数据库相关测试，需要为测试单独提供数据源/建表脚本。
+- 测试现状：`SmokeTest` 是空测试；`CrawlerResilienceTest` 用本地 `HttpServer` 和 Fake DAO
+  验证「单条链接失败不影响线程」，不连数据库。H2 依赖在 `pom.xml` 里，但 `config.xml` 指向真实
+  MySQL，H2 **不会**自动生效。要写数据库相关测试，需要为测试单独提供数据源/建表脚本。
 
 ## 6. Elasticsearch 相关
 

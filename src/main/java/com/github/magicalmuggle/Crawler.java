@@ -8,6 +8,7 @@ import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.apache.ibatis.exceptions.PersistenceException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -33,13 +34,9 @@ public class Crawler extends Thread {
                 if (dao.isLinkProcessed(link)) {
                     continue;
                 }
-                System.out.println(link);
-                Document doc = httpGetAndParseHTML(link);
-                parseUrlsFromPageAndStoreIntoDatabase(doc);
-                storeIntoDatabaseIfItIsNewsPage(doc, link);
-                dao.insertLinkAlreadyProcessed(link);
+                processLink(link);
             }
-        } catch (SQLException | IOException | ParseException e) {
+        } catch (SQLException | PersistenceException e) {
             throw new RuntimeException(e);
         }
     }
@@ -54,7 +51,32 @@ public class Crawler extends Thread {
                 parseUrlsFromPageAndStoreIntoDatabase(doc);
                 dao.insertLinkAlreadyProcessed(indexLink);
             }
-        } catch (IOException | ParseException | SQLException e) {
+        } catch (SQLException | PersistenceException e) {
+            throw new RuntimeException(e);
+        } catch (IOException | ParseException | RuntimeException e) {
+            System.out.println("[skip] " + indexLink + " <- " + e);
+        }
+    }
+
+    private void processLink(String link) {
+        try {
+            System.out.println(link);
+            Document doc = httpGetAndParseHTML(link);
+            parseUrlsFromPageAndStoreIntoDatabase(doc);
+            storeIntoDatabaseIfItIsNewsPage(doc, link);
+            dao.insertLinkAlreadyProcessed(link);
+        } catch (SQLException | PersistenceException e) {
+            throw new RuntimeException(e);
+        } catch (IOException | ParseException | RuntimeException e) {
+            System.out.println("[skip] " + link + " <- " + e);
+            markLinkAsProcessed(link);
+        }
+    }
+
+    private void markLinkAsProcessed(String link) {
+        try {
+            dao.insertLinkAlreadyProcessed(link);
+        } catch (SQLException | PersistenceException e) {
             throw new RuntimeException(e);
         }
     }
