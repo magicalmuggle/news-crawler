@@ -28,7 +28,7 @@ public interface AdminMapper {
 
     Long countLinksProcessed();
 
-    List<String> selectProcessedLinks(@Param("pattern") String pattern, @Param("limit") int limit);
+    List<ProcessedLink> selectProcessedLinks(@Param("pattern") String pattern, @Param("limit") int limit);
 
     Integer ping();
 

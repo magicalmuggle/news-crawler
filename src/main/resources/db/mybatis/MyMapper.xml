@@ -22,4 +22,12 @@
         (link)
         values (#{link})
     </insert>
+    <insert id="insertProcessedLink">
+        insert into links_already_processed (link, reason)
+        values (#{link}, #{reason})
+    </insert>
+    <insert id="insertFailedLink">
+        insert into failed_links (link, status_code, outcome)
+        values (#{link}, #{statusCode}, #{outcome})
+    </insert>
 </mapper>

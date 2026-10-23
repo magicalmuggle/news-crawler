@@ -52,7 +52,16 @@ public class MyBatisCrawlerDao implements CrawlerDao {
     }
 
     @Override
-    public void insertLinkAlreadyProcessed(String link) {
-        insertLink("links_already_processed", link);
+    public void insertLinkAlreadyProcessed(String link, String reason) {
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(true)) {
+            sqlSession.getMapper(MyMapper.class).insertProcessedLink(link, reason);
+        }
+    }
+
+    @Override
+    public void insertFailedLink(String link, int statusCode, String outcome) {
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(true)) {
+            sqlSession.getMapper(MyMapper.class).insertFailedLink(link, statusCode, outcome);
+        }
     }
 }

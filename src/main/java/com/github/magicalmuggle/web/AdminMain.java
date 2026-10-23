@@ -31,16 +31,20 @@ public final class AdminMain {
 
         AdminDao dao = new AdminDao();
         RunDao runDao = new RunDao();
+        FailedLinkDao failedLinks = new FailedLinkDao();
+        SearchService search = new ElasticsearchSearchService();
         LogTailer logs = new LogTailer(LogTailer.defaultLogFile());
         CrawlMonitor monitor = new CrawlMonitor();
         RunManager runs = new RunManager(new DefaultCrawlLauncher(), runDao, monitor);
         try {
-            AdminServer server = new AdminServer(dao, logs, runs, port, bind);
+            AdminServer server = new AdminServer(dao, logs, runs, failedLinks, search, port, bind);
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 server.stop();
                 runs.close();
+                closeQuietly(search);
                 dao.close();
                 runDao.close();
+                failedLinks.close();
             }, "admin-shutdown"));
             server.start();
             LOG.info("admin ui listening on http://{}:{}/", bind, server.port());
@@ -50,14 +54,26 @@ public final class AdminMain {
         } catch (IOException e) {
             LOG.error("failed to start the admin ui on {}:{}: {}", bind, port, e.getMessage());
             runs.close();
+            closeQuietly(search);
             dao.close();
             runDao.close();
+            failedLinks.close();
             System.exit(1);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             runs.close();
+            closeQuietly(search);
             dao.close();
             runDao.close();
+            failedLinks.close();
+        }
+    }
+
+    private static void closeQuietly(SearchService search) {
+        try {
+            search.close();
+        } catch (IOException e) {
+            LOG.warn("failed to close the search client: {}", e.getMessage());
         }
     }
 

@@ -1,6 +1,7 @@
 package com.github.magicalmuggle.web;
 
 import com.github.magicalmuggle.CrawlConfig;
+import com.github.magicalmuggle.LinkPolicy;
 import com.github.magicalmuggle.News;
 import com.sun.net.httpserver.HttpExchange;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
@@ -28,15 +29,19 @@ public final class ApiRoutes {
     private final AdminDao dao;
     private final LogTailer logs;
     private final RunManager runs;
+    private final FailedLinkDao failedLinks;
+    private final SearchService search;
     private final HealthChecker health;
     private final BooleanSupplier running;
 
     @SuppressFBWarnings("EI_EXPOSE_REP2")
-    public ApiRoutes(AdminDao dao, LogTailer logs, RunManager runs, HealthChecker health,
-            BooleanSupplier running) {
+    public ApiRoutes(AdminDao dao, LogTailer logs, RunManager runs, FailedLinkDao failedLinks,
+            SearchService search, HealthChecker health, BooleanSupplier running) {
         this.dao = dao;
         this.logs = logs;
         this.runs = runs;
+        this.failedLinks = failedLinks;
+        this.search = search;
         this.health = health;
         this.running = running;
     }
@@ -58,6 +63,15 @@ public final class ApiRoutes {
         }
         if (path.startsWith("/api/runs/")) {
             handleRunAction(exchange, method, path);
+            return;
+        }
+        if ("/api/links/failed".equals(path)) {
+            requireGet(method);
+            failedLinksReport(exchange, HttpSupport.queryParams(exchange));
+            return;
+        }
+        if (path.startsWith("/api/links/failed/")) {
+            handleRequeue(exchange, method, path);
             return;
         }
 
@@ -87,6 +101,12 @@ public final class ApiRoutes {
                 break;
             case "/api/config/effective":
                 configEffective(exchange);
+                break;
+            case "/api/search":
+                searchNews(exchange, params);
+                break;
+            case "/api/links/check":
+                checkLink(exchange, params);
                 break;
             default:
                 if (path.startsWith("/api/news/")) {
@@ -225,6 +245,77 @@ public final class ApiRoutes {
                 // 客户端已断开
             }
         }
+    }
+
+    private void handleRequeue(HttpExchange exchange, String method, String path) throws IOException {
+        if (!"POST".equalsIgnoreCase(method)) {
+            throw new ApiException(405, "method not allowed");
+        }
+        String rest = path.substring("/api/links/failed/".length());
+        if (!rest.endsWith("/requeue")) {
+            throw new ApiException(404, "unknown endpoint: " + path);
+        }
+        long id = parseId(rest.substring(0, rest.length() - "/requeue".length()));
+        boolean requeued;
+        try {
+            requeued = failedLinks.requeue(id);
+        } catch (RuntimeException e) {
+            throw new ApiException(503, "failed_links 表不可用，请先执行 mvn flyway:migrate");
+        }
+        if (!requeued) {
+            throw new ApiException(404, "failed link not found");
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("requeued", true);
+        body.put("id", id);
+        HttpSupport.sendJson(exchange, 200, body);
+    }
+
+    private void failedLinksReport(HttpExchange exchange, Map<String, String> params) throws IOException {
+        int limit = HttpSupport.limitParam(params);
+        Map<String, Object> body = new LinkedHashMap<>();
+        try {
+            body.put("total", failedLinks.count());
+            body.put("items", failedLinks.recent(limit));
+        } catch (RuntimeException e) {
+            throw new ApiException(503, "failed_links 表不可用，请先执行 mvn flyway:migrate");
+        }
+        HttpSupport.sendJson(exchange, 200, body);
+    }
+
+    private void searchNews(HttpExchange exchange, Map<String, String> params) throws IOException {
+        String keyword = truncate(HttpSupport.stringParam(params, "q"));
+        if (keyword == null) {
+            throw new ApiException(400, "q is required");
+        }
+        int page = HttpSupport.intParam(params, "page", 1, 1, 50);
+        int size = HttpSupport.intParam(params, "size", 20, 1, 50);
+        try {
+            SearchResult result = search.search(keyword, (page - 1) * size, size);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("items", result.getHits());
+            body.put("total", result.getTotal());
+            body.put("page", page);
+            body.put("size", size);
+            HttpSupport.sendJson(exchange, 200, body);
+        } catch (IOException | RuntimeException e) {
+            throw new ApiException(503, "搜索服务不可用：" + rootMessage(e));
+        }
+    }
+
+    private void checkLink(HttpExchange exchange, Map<String, String> params) throws IOException {
+        String url = HttpSupport.stringParam(params, "url");
+        if (url == null) {
+            throw new ApiException(400, "url is required");
+        }
+        if (url.length() > 4096) {
+            throw new ApiException(400, "url is too long");
+        }
+        LinkPolicy.Decision decision = LinkPolicy.check(url);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("accepted", decision.isAccepted());
+        body.put("reason", decision.getReason());
+        HttpSupport.sendJson(exchange, 200, body);
     }
 
     private void configEffective(HttpExchange exchange) throws IOException {

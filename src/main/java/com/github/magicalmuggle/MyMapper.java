@@ -12,4 +12,9 @@ public interface MyMapper {
     void insertNews(News news);
 
     void insertLink(@Param("tableName") String tableName, @Param("link") String link);
+
+    void insertProcessedLink(@Param("link") String link, @Param("reason") String reason);
+
+    void insertFailedLink(@Param("link") String link, @Param("statusCode") int statusCode,
+            @Param("outcome") String outcome);
 }

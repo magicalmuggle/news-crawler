@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 失败链接：只读取和「重新入队」，不参与爬虫的自动重试 -->
+<mapper namespace="com.github.magicalmuggle.web.FailedLinkMapper">
+    <select id="selectFailedLinks" resultType="com.github.magicalmuggle.web.FailedLink">
+        select id, link, status_code, outcome, created_at
+        from failed_links
+        order by id desc
+        limit #{limit}
+    </select>
+
+    <select id="countFailedLinks" resultType="java.lang.Long">
+        select count(*) from failed_links
+    </select>
+
+    <select id="selectFailedLink" resultType="com.github.magicalmuggle.web.FailedLink">
+        select id, link, status_code, outcome, created_at
+        from failed_links
+        where id = #{id}
+    </select>
+
+    <insert id="insertLinkToBeProcessed">
+        insert into links_to_be_processed (link) values (#{link})
+    </insert>
+
+    <delete id="deleteFailedLink">
+        delete from failed_links where id = #{id}
+    </delete>
+</mapper>

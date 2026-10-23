@@ -9,6 +9,7 @@ import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
@@ -43,6 +44,7 @@ final class H2TestSupport {
             statement.execute("drop table if exists links_to_be_processed");
             statement.execute("drop table if exists links_already_processed");
             statement.execute("drop table if exists crawl_runs");
+            statement.execute("drop table if exists failed_links");
             statement.execute("create table news ("
                     + "id bigint auto_increment primary key, "
                     + "title text, "
@@ -53,7 +55,13 @@ final class H2TestSupport {
             statement.execute("create table links_to_be_processed ("
                     + "id bigint auto_increment primary key, link varchar(4096))");
             statement.execute("create table links_already_processed ("
-                    + "id bigint auto_increment primary key, link varchar(4096))");
+                    + "id bigint auto_increment primary key, link varchar(4096), reason varchar(32))");
+            statement.execute("create table failed_links ("
+                    + "id bigint auto_increment primary key, "
+                    + "link varchar(4096) not null, "
+                    + "status_code int null, "
+                    + "outcome varchar(32) null, "
+                    + "created_at timestamp not null default current_timestamp)");
             statement.execute("create table crawl_runs ("
                     + "id bigint auto_increment primary key, "
                     + "started_at timestamp not null, "
@@ -91,6 +99,23 @@ final class H2TestSupport {
         try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, link);
             statement.executeUpdate();
+        }
+    }
+
+    static void insertFailedLink(String link, int statusCode, String outcome) throws SQLException {
+        String sql = "insert into failed_links (link, status_code, outcome) values (?, ?, ?)";
+        try (Connection connection = connect(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, link);
+            statement.setInt(2, statusCode);
+            statement.setString(3, outcome);
+            statement.executeUpdate();
+        }
+    }
+
+    static int countRows(String table) throws SQLException {
+        try (Connection connection = connect(); Statement statement = connection.createStatement();
+                ResultSet resultSet = statement.executeQuery("select count(*) from " + table)) {
+            return resultSet.next() ? resultSet.getInt(1) : 0;
         }
     }
 }

@@ -7,6 +7,8 @@ import java.util.List;
 // 不连数据库的测试替身：队列是内存里的 list，写操作只记录。
 final class FakeCrawlerDao implements CrawlerDao {
     final List<String> processedLinks = Collections.synchronizedList(new ArrayList<String>());
+    final List<String[]> processedWithReason = Collections.synchronizedList(new ArrayList<String[]>());
+    final List<String[]> failedLinks = Collections.synchronizedList(new ArrayList<String[]>());
     final List<String[]> news = Collections.synchronizedList(new ArrayList<String[]>());
 
     private final List<String> queue;
@@ -38,7 +40,13 @@ final class FakeCrawlerDao implements CrawlerDao {
     }
 
     @Override
-    public void insertLinkAlreadyProcessed(String link) {
+    public void insertLinkAlreadyProcessed(String link, String reason) {
         processedLinks.add(link);
+        processedWithReason.add(new String[]{link, reason});
+    }
+
+    @Override
+    public void insertFailedLink(String link, int statusCode, String outcome) {
+        failedLinks.add(new String[]{link, String.valueOf(statusCode), outcome});
     }
 }

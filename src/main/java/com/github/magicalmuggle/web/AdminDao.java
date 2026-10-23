@@ -63,7 +63,7 @@ public class AdminDao {
         return value == null ? 0L : value;
     }
 
-    public List<String> processedLinks(String pattern, int limit) {
+    public List<ProcessedLink> processedLinks(String pattern, int limit) {
         return query(mapper -> mapper.selectProcessedLinks(pattern, limit));
     }
 

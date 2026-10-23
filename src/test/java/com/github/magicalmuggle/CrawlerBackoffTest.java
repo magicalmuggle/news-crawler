@@ -30,6 +30,8 @@ class CrawlerBackoffTest {
                 assertTrue(dao.news.isEmpty(), "a blocked response must not produce news");
                 assertTrue(session.isTripped(), "two blocked responses should trip the circuit breaker");
                 assertEquals(1, session.droppedLinks());
+                assertEquals(1, dao.failedLinks.size(), "the dropped link should be recorded in failed_links");
+                assertEquals("RATE_LIMITED", dao.failedLinks.get(0)[2]);
             }
         } finally {
             server.stop(0);
@@ -49,6 +51,8 @@ class CrawlerBackoffTest {
 
                 assertFalse(crawler.isAlive(), "crawler thread should finish");
                 assertTrue(dao.processedLinks.contains(link), "404 should be recorded as processed");
+                assertEquals("DEAD", dao.processedWithReason.get(0)[1]);
+                assertTrue(dao.failedLinks.isEmpty(), "a 404 is not a failure");
                 assertTrue(dao.news.isEmpty());
                 assertFalse(session.isTripped());
                 assertEquals(0, session.droppedLinks());

@@ -1,9 +1,9 @@
 # Web UI 设计
 
-> 状态：P0（只读）与 P1（运行控制）已实现；P2（搜索 / 规则预览 / 失败重试）待做。
+> 状态：P0（只读）、P1（运行控制）、P2（搜索 / 规则预览 / 失败重试）均已实现。
 > 范围：为现有爬虫增加一个 Web 管理界面，覆盖「观察 → 控制 → 检索」三层能力。
 > 前置阅读：[AGENTS.md](../AGENTS.md) 的「运行时架构」与「数据层约定」两节。
-> P0 的落地细节见「13. P0 实现说明」，P1 见「14. P1 实现说明」。
+> 落地细节见「13. P0」「14. P1」「15. P2」三节。
 
 ## 1. 背景
 
@@ -513,3 +513,51 @@ P1 已完成：在同一个进程内启动/停止抓取、实时指标、运行�
 - **没有对真实站点执行抓取**：所有运行相关测试都用 `CrawlLauncher` 替身，
   不会发出 HTTP 请求，也不会写 `news` 表。
 - 运行前需要先执行 `mvn flyway:migrate` 创建 `crawl_runs`（V3）。
+
+## 15. P2 实现说明
+
+P2 补齐了检索与排障相关的能力：ES 搜索、链接规则预览、失败链接重试、死链状态。
+
+### 15.1 新增组件
+
+| 文件 | 作用 |
+| --- | --- |
+| `LinkPolicy.java` | 链接过滤规则的唯一实现，返回「是否接受 + 原因」 |
+| `web/SearchService.java` / `web/ElasticsearchSearchService.java` | 搜索抽象与 ES 实现（懒加载、复用客户端） |
+| `web/SearchResult.java` / `web/SearchHit.java` | 一页搜索结果 |
+| `web/FailedLink.java` / `web/FailedLinkMapper.java` / `web/FailedLinkDao.java` | 失败链接的读取与重新入队 |
+| `db/migration/V4__Add_reason_and_failed_links.sql` | `links_already_processed.reason` + `failed_links` |
+| `db/mybatis/FailedLinkMapper.xml` | 失败链接 SQL |
+
+### 15.2 语义
+
+- **失败链接**：被拦（403/429/503）或网络错误在重试耗尽后写入 `failed_links`，
+  仍然**不写** `links_already_processed`；手动停止导致的提前退出既不算失败，也不计入 `droppedLinks`。
+- **重新入队**是事务操作：`insert into links_to_be_processed` + `delete from failed_links` 同一个 session，
+  失败则回滚。
+- **死链**：`links_already_processed.reason` 记录 `OK` / `DEAD` / `SKIPPED`，界面据此区分。
+- **规则预览**只做字符串判断，不会发起任何请求（避免 SSRF）。
+
+### 15.3 新增 API
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/search?q=&page=&size=` | ES 的 title match 查询；ES 不可用返回 503 |
+| GET | `/api/links/check?url=` | 返回 `{accepted, reason}` |
+| GET | `/api/links/failed?limit=` | 失败链接列表 + 总数，表缺失返回 503 |
+| POST | `/api/links/failed/{id}/requeue` | 放回待处理队列 |
+
+### 15.4 与设计稿的差异
+
+1. **搜索不做高亮**，只返回 `_score` 与摘要；正文在写入 ES 前已被裁剪到 10 个字符，摘要意义有限。
+2. **失败链接不自动重试**，只提供手动「重新入队」，避免在被限流时自动放大请求。
+3. **规则预览是纯字符串判断**，与 `Crawler.isRequiredLink` 共用 `LinkPolicy`，不会出现两套规则。
+4. **`failed_links` 不记录尝试次数**：重试次数由运行参数决定，失败表只保留状态码与结果。
+
+### 15.5 校验方式
+
+- `mvn test`：45 个测试。新增 `LinkPolicyTest`（规则边界）、`FailedLinkDaoTest`（重新入队事务）、
+  `CrawlerBackoffTest` 对 `failed_links` 与 `DEAD` 原因的断言，`AdminServerTest` 覆盖搜索 / 规则 / 失败链接接口。
+- 搜索用 `SearchService` 替身测试，真实 Elasticsearch 未在本环境联调；ES 不可用时的 503 降级路径由接口测试覆盖。
+- `mvn clean verify`（JDK 8）通过：45 测试 + Checkstyle + SpotBugs。
+- 需要先执行 `mvn flyway:migrate` 应用 V4（`reason` 列与 `failed_links` 表）。

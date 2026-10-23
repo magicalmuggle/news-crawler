@@ -59,7 +59,7 @@
     </select>
 
     <select id="selectProcessedLinks" resultType="java.lang.String">
-        select link
+        select link, reason
         from links_already_processed
         <where>
             <if test="pattern != null and pattern != ''">

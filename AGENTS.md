@@ -7,7 +7,7 @@
 
 多线程新闻爬虫：抓取新浪新闻（sina.cn）→ MySQL → 同步到 Elasticsearch 提供全文搜索。
 以 CLI 为主，每个功能都是独立的 `main` 入口；另有一个 Web 管理界面
-（`com.github.magicalmuggle.web.AdminMain`，P0 只读 + P1 起停抓取）。
+（`com.github.magicalmuggle.web.AdminMain`，P0 只读 + P1 起停 + P2 搜索/重试）。
 
 | 项目 | 值 |
 | --- | --- |
@@ -58,7 +58,7 @@ mvn flyway:migrate          # 执行数据库迁移（需要可用的 MySQL）
 | `com.github.magicalmuggle.ElasticsearchEngine` | 交互式搜索：循环读 stdin，按 `title` 做 match 查询 |
 | `com.github.magicalmuggle.ElasticsearchDataGenerator` | 把 MySQL 数据批量写入 Elasticsearch（16 线程 × 1000 次 bulk） |
 | `com.github.magicalmuggle.MockDataGenerator` | 生成/补足 100 万条模拟新闻（会写真实库，慎用） |
-| `com.github.magicalmuggle.web.AdminMain` | Web 管理界面：只读浏览 + 「运行」页起停抓取，`--port` / `--bind` |
+| `com.github.magicalmuggle.web.AdminMain` | Web 管理界面：只读浏览、运行起停、搜索与失败重试，`--port` / `--bind` |
 
 ## 3. 目录结构
 
@@ -82,10 +82,10 @@ src/main/java/com/github/magicalmuggle/
 ├── ElasticsearchUtil.java          # ES 客户端构造（HTTPS、证书、认证）
 ├── ElasticsearchEngine.java        # 搜索 CLI
 ├── ElasticsearchDataGenerator.java # MySQL → Elasticsearch
-├── web/                            # Web 管理界面（P0 只读 + P1 起停）
+├── web/                            # Web 管理界面（P0 只读 + P1 起停 + P2 搜索/重试）
 │   ├── AdminMain.java              # 入口：--port / --bind，默认 127.0.0.1:8080
 │   ├── AdminServer.java            # JDK HttpServer：路由、静态文件、错误处理
-│   ├── ApiRoutes.java              # API：overview/news/links/logs/health/runs
+│   ├── ApiRoutes.java              # API：overview/news/links/logs/health/runs/search
 │   ├── AdminDao.java               # 只读查询（复用单例 SqlSessionFactory）
 │   ├── AdminMapper.java            # MyBatis Mapper 接口
 │   ├── NewsSummary.java            # 列表视图：不带正文，只带 contentLength
@@ -96,18 +96,24 @@ src/main/java/com/github/magicalmuggle/
 │   ├── RunState.java / StopReason.java / RunSnapshot.java
 │   ├── CrawlLauncher.java / CrawlExecution.java / DefaultCrawlLauncher.java
 │   ├── RunDao.java / RunMapper.java / RunRecord.java  # crawl_runs 持久化
+│   ├── SearchService.java / ElasticsearchSearchService.java  # ES 搜索（懒加载复用客户端）
+│   ├── SearchHit.java / SearchResult.java
+│   ├── FailedLink.java / FailedLinkMapper.java / FailedLinkDao.java  # 失败链接读取与重入队
 │   └── ...
 ├── CrawlMonitor.java               # 每个 worker 的当前链接/尝试/阶段（旁路观测）
+├── LinkPolicy.java                 # 链接过滤规则（Crawler 与界面共用）
 └── MockDataGenerator.java          # 模拟数据生成
 
 src/main/resources/db/migration/V1__Create_tables.sql   # 三张表的建表脚本
 src/main/resources/db/migration/V2__Add_indexes_to_link_tables.sql  # 两张链接表的索引
 src/main/resources/db/migration/V3__Create_crawl_runs.sql           # 运行历史表
+src/main/resources/db/migration/V4__Add_reason_and_failed_links.sql  # 死链原因 + 失败链接表
 src/main/resources/db/mybatis/config.xml                # 数据源 + Mapper 注册
 src/main/resources/db/mybatis/MyMapper.xml              # 爬虫用 SQL
 src/main/resources/db/mybatis/MockMapper.xml            # 模拟数据 / 导出用 SQL
 src/main/resources/db/mybatis/AdminMapper.xml           # 管理界面只读 SQL
 src/main/resources/db/mybatis/RunMapper.xml             # 运行历史 SQL
+src/main/resources/db/mybatis/FailedLinkMapper.xml      # 失败链接 SQL
 src/main/resources/web/                                 # 管理界面静态文件（index.html/app.js/style.css）
 src/main/resources/logback.xml                          # 日志：控制台 + 滚动文件
 src/test/java/com/github/magicalmuggle/SmokeTest.java   # 空测试
@@ -143,18 +149,19 @@ sina.cn ──HTTP──> Crawler（多个线程）
    （超时 5s/10s、keep-alive、关掉 HttpClient 自带的静默重试；`cleanUrl` 去掉 URL 中的 `{` `}`）。
 6. 按状态码分流：`200` 正常解析；`404/410/其它 4xx` 记为 DEAD 并标记已处理；
    `403/429/503` 不标记已处理，按退避（优先 `Retry-After`）重试并计入熔断；
-   超时 / 连接失败同样指数退避重试。重试耗尽仍失败的链接只计入 `droppedLinks`。
+   超时 / 连接失败同样指数退避重试。重试耗尽仍失败的链接计入 `droppedLinks`，
+   并写入 `failed_links`（仍然不写已处理表）。
 7. `parseUrlsFromPageAndStoreIntoDatabase`：取所有 `<a>`，过滤后入队；`//` 开头补 `https:`，并删除空白字符。
 8. `storeIntoDatabaseIfItIsNewsPage`：页面存在 `<article>`，且第一个子节点文本作 title、
    所有 `<p>` 拼接作 content，两者都非空才写 `news` 表。
-9. `dao.insertLinkAlreadyProcessed(link)`：只在 OK / DEAD 时标记已处理。
+9. `dao.insertLinkAlreadyProcessed(link, reason)`：只在 OK / DEAD 时标记已处理，reason 取 OK / DEAD / SKIPPED。
 
 - **不要把失败链接标记为已处理**：否则被拦一次就等于永久丢掉这条数据，而且从日志上看不出来。
-- 被拦或网络错误只会在日志里留下 WARN，链接不写已处理表，下一轮从首页重新发现时还能再爬。
+- 被拦或网络错误：日志 WARN + 写入 `failed_links`，但**不写已处理表**，下一轮从首页重新发现时还能再爬。
 - 数据库异常（`SQLException` / `PersistenceException`）仍包成 `RuntimeException` 抛出，**线程会终止**。
   排查时先看第一条堆栈。
 
-### 链接过滤规则（`Crawler.isRequiredLink`）
+### 链接过滤规则（`LinkPolicy.check`，Crawler 直接委托）
 
 必须同时满足：
 
@@ -179,10 +186,11 @@ sina.cn ──HTTP──> Crawler（多个线程）
 
 ## 5. 数据层约定
 
-三张表（见 `V1__Create_tables.sql`）：`news`、`links_to_be_processed`、`links_already_processed`。
+三张业务表（`V1`）：`news`、`links_to_be_processed`、`links_already_processed`；
+另外 `crawl_runs`（`V3`，运行历史）和 `failed_links`（`V4`，失败链接）只服务管理界面，不参与抓取循环。
 
-`CrawlerDao` 的 5 个方法：`getNextLinkThenDelete`、`insertNewsIntoDatabase`、`isLinkProcessed`、
-`insertLinkToBeProcessed`、`insertLinkAlreadyProcessed`。
+`CrawlerDao` 的 6 个方法：`getNextLinkThenDelete`、`insertNewsIntoDatabase`、`isLinkProcessed`、
+`insertLinkToBeProcessed`、`insertLinkAlreadyProcessed(link, reason)`、`insertFailedLink`。
 
 - **改表结构**：新增 `V2__xxx.sql` 之类的迁移文件，**不要修改已应用过的 `V1`**。
 - 链接表的索引在 `V2`：两张表各有自增主键和 `idx_link (link(191))` 前缀索引。
@@ -200,7 +208,8 @@ sina.cn ──HTTP──> Crawler（多个线程）
   涉及退避的测试把 `retryBackoffMillis` 设成 1ms，别让它真的等几秒。
   Web 层的测试用 H2（`src/test/resources/db/mybatis/config-h2.xml` + `H2TestSupport`）：
   `AdminDaoTest` 验证只读 SQL，`AdminServerTest` 在随机端口上做端到端 HTTP 验证，
-  `RunDaoTest` 覆盖 `crawl_runs` 的增改查，`RunManagerTest` 用 `CrawlLauncher` 替身验证起停状态机。
+  `RunDaoTest` 覆盖 `crawl_runs` 的增改查，`RunManagerTest` 用 `CrawlLauncher` 替身验证起停状态机，
+  `FailedLinkDaoTest` 覆盖重新入队事务，`LinkPolicyTest` 覆盖过滤规则边界。
   这些测试都不连真实 MySQL、也不发出 HTTP 请求。
   注意 H2 只用于测试；应用运行时的 `config.xml` 仍指向真实 MySQL。
 
@@ -209,7 +218,8 @@ sina.cn ──HTTP──> Crawler（多个线程）
 - 连接参数硬编码在 `ElasticsearchUtil`：`https://localhost:9200`、用户 `elastic`、密码常量、
   CA 证书 `./http_ca.crt`（该文件被 `.gitignore` 忽略，需要从 ES 容器里 `docker cp` 出来）。
 - 客户端注入 `JavaTimeModule`，`News` 的 `Instant` 字段才能正确序列化。
-- `ElasticsearchEngine` 每个关键字都会新建客户端、查询后关闭 transport；这是现有模式，保持一致。
+- `ElasticsearchEngine` 每个关键字都会新建客户端、查询后关闭 transport；这是 CLI 的现有模式，保持一致。
+- Web 的 `ElasticsearchSearchService` 相反：懒加载后复用同一个客户端，请求结束不关闭，只在进程退出时关。
 - `ElasticsearchDataGenerator` 先把内容裁剪到 10 个字符（`News.cutNewsContent`）以节省磁盘，
   这是**写 ES 前的有损操作**，不要把它挪到读 MySQL 之前。
 
@@ -253,22 +263,24 @@ sina.cn ──HTTP──> Crawler（多个线程）
 - **`AdminMain` 默认监听 `127.0.0.1` 且没有认证**：不要绑定到公网地址。
   它的「运行」页可以启动**真实抓取**（会访问新浪并写库），但服务启动本身不会抓取；
   自动化测试、脚本、CI 里**不要**调用 `POST /api/runs`，运行控制相关的测试一律用 `CrawlLauncher` 替身。
-  除 `crawl_runs` 运行历史外，它没有其他写路径（删除链接、重试失败链接属于 P2，需要单独评审）。
+  它的写路径只有三类：`crawl_runs` 运行历史、启动/停止抓取、把失败链接重新入队（
+  写 `links_to_be_processed` 并删 `failed_links`）。删除链接、清空队列等破坏性操作仍然没有入口。
 
 ## 9. 常见修改路径
 
 | 需求 | 改动位置 |
 | --- | --- |
-| 新增 / 调整链接过滤规则 | `Crawler.isRequiredLink` 及其组合的私有方法 |
+| 新增 / 调整链接过滤规则 | `LinkPolicy.check`（Crawler 与界面共用同一套规则） |
 | 调整新闻标题 / 正文抽取 | `Crawler.storeIntoDatabaseIfItIsNewsPage` |
 | 加字段 / 加表 | 新增 Flyway 脚本 + `News` + `MyMapper`/`MyMapper.xml` |
 | 新增查询能力 | `CrawlerDao` / `MyBatisCrawlerDao` / `MyMapper` / `MyMapper.xml` 四处 |
-| 调整搜索行为 | `ElasticsearchEngine.searchTitle`，注意索引名固定为 `news` |
+| 调整搜索行为 | CLI：`ElasticsearchEngine.searchTitle`；Web：`ElasticsearchSearchService.search`；索引名固定为 `news` |
 | 调整抓取速率 / 并发 / 单次页数上限 | `CrawlConfig`（键名 `crawler.*`）；速率逻辑在 `CrawlThrottle` |
 | 调整重试 / 熔断策略 | `Crawler.fetchWithRetry`、`Crawler.backoffMillis`、`CircuitBreaker` |
 | 调整线程模型 | `Main` + `MyBatisCrawlerDao.getNextLinkThenDelete` 的同步语义 |
 | 改 Web 管理界面 | `web/` 下的路由与页面；查询加在 `AdminMapper` / `AdminMapper.xml`（只读） |
 | 改运行控制 / 起停语义 | `RunManager`（状态机）+ `DefaultCrawlLauncher`（真实流程）+ `CrawlSession#requestStop` |
+| 失败链接 / 死链展示 | `FailedLinkDao`（重入队事务）+ `Crawler.recordFailure` + `V4` 的 `reason` 列 |
 
 ## 10. 提交与 CI
 

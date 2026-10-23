@@ -257,31 +257,120 @@ async function openNews(id) {
 
 /* ---------------------------- 链接队列 --------------------------- */
 
+const PROCESSED_REASON_LABELS = {
+    OK: '已抓取',
+    DEAD: '死链',
+    SKIPPED: '跳过'
+};
+
+function linkRulePanel() {
+    const input = h('input', { type: 'search', placeholder: '粘贴一个 URL，看它会不会被抓' });
+    const result = h('div', { class: 'muted', style: 'margin-top:8px' });
+
+    async function check() {
+        const url = input.value.trim();
+        if (!url) {
+            result.replaceChildren();
+            return;
+        }
+        try {
+            const data = await api('/api/links/check', { url: url });
+            result.replaceChildren(
+                h('span', { class: 'badge ' + (data.accepted ? 'up' : 'down'),
+                    text: data.accepted ? '会抓' : '不会抓' }),
+                h('span', { style: 'margin-left:8px', text: data.reason }));
+        } catch (error) {
+            result.replaceChildren(h('span', { class: 'badge down', text: '检查失败' }),
+                h('span', { style: 'margin-left:8px', text: error.message }));
+        }
+    }
+
+    input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            check();
+        }
+    });
+
+    return h('section', { class: 'panel' },
+        h('h2', { text: '链接规则预览' }),
+        h('p', { class: 'muted', style: 'margin-top:-6px', text: '只做字符串判断，不会发起请求。' }),
+        h('div', { class: 'toolbar', style: 'margin-bottom:0' }, input,
+            h('button', { type: 'button', onclick: check }, '检查')),
+        result);
+}
+
+async function renderFailed(root) {
+    root.replaceChildren(h('div', { class: 'empty', text: '加载中…' }));
+    try {
+        const data = await api('/api/links/failed', { limit: 100 });
+
+        async function requeue(item) {
+            if (!window.confirm('把这个链接放回待处理队列？下一轮抓取会重新尝试。')) {
+                return;
+            }
+            try {
+                await api('/api/links/failed/' + item.id + '/requeue', null, { method: 'POST' });
+                renderFailed(root);
+            } catch (error) {
+                window.alert('重新入队失败：' + error.message);
+            }
+        }
+
+        const rows = data.items.map((item) => h('tr', {},
+            h('td', { class: 'mono', text: item.link }),
+            h('td', { class: 'mono', text: item.statusCode || '-' }),
+            h('td', {}, h('span', { class: 'badge source', text: item.outcome || '-' })),
+            h('td', { text: fmtTime(item.createdAt) }),
+            h('td', {}, h('button', { type: 'button', onclick: () => requeue(item) }, '重新入队'))));
+
+        root.replaceChildren(
+            h('div', { class: 'stat-grid' },
+                statCard('失败链接总数', fmtNum(data.total), 'failed_links')),
+            h('div', { class: 'note' }, '这些链接在重试耗尽后被记录，不会写进 links_already_processed。'),
+            h('section', { class: 'panel' },
+                h('h2', { text: '最近失败（最多 100 条）' }),
+                h('table', {},
+                    h('thead', {}, h('tr', {},
+                        h('th', { text: '链接' }),
+                        h('th', { text: '状态码' }),
+                        h('th', { text: '结果' }),
+                        h('th', { text: '时间' }),
+                        h('th', { text: '' }))),
+                    h('tbody', {}, rows.length ? rows : emptyRow(5, '没有失败记录')))));
+    } catch (error) {
+        root.replaceChildren(errorBox(error));
+    }
+}
+
 async function renderLinks(root) {
     const content = h('div');
-    const pendingTab = h('button', { type: 'button', class: 'active' }, '待处理');
-    const processedTab = h('button', { type: 'button' }, '已处理');
+    const tabs = [
+        ['pending', '待处理'],
+        ['processed', '已处理'],
+        ['failed', '失败链接']
+    ].map(([name, label]) => {
+        const button = h('button', { type: 'button' }, label);
+        button.addEventListener('click', () => select(name));
+        return { name, button };
+    });
 
-    function selectPending() {
-        pendingTab.classList.add('active');
-        processedTab.classList.remove('active');
-        renderPending(content);
+    function select(name) {
+        tabs.forEach((tab) => tab.button.classList.toggle('active', tab.name === name));
+        if (name === 'processed') {
+            renderProcessed(content);
+        } else if (name === 'failed') {
+            renderFailed(content);
+        } else {
+            renderPending(content);
+        }
     }
-
-    function selectProcessed() {
-        processedTab.classList.add('active');
-        pendingTab.classList.remove('active');
-        renderProcessed(content);
-    }
-
-    pendingTab.addEventListener('click', selectPending);
-    processedTab.addEventListener('click', selectProcessed);
 
     root.replaceChildren(
         pageHead('链接队列', '待处理表是破坏性消费的队列，这里只观察，不提供删除入口'),
-        h('div', { class: 'toolbar' }, pendingTab, processedTab),
+        linkRulePanel(),
+        h('div', { class: 'toolbar' }, tabs.map((tab) => tab.button)),
         content);
-    selectPending();
+    select('pending');
 }
 
 async function renderPending(root) {
@@ -324,15 +413,20 @@ async function renderProcessed(root) {
         list.replaceChildren(h('div', { class: 'empty', text: '加载中…' }));
         try {
             const data = await api('/api/links/processed', { limit: 100, q: search.value.trim() });
-            const rows = data.items.map((link) => h('tr', {}, h('td', { class: 'mono', text: link })));
+            const rows = data.items.map((item) => h('tr', {},
+                h('td', { class: 'mono', text: item.link }),
+                h('td', {}, h('span', { class: 'badge source',
+                    text: PROCESSED_REASON_LABELS[item.reason] || item.reason || '-' }))));
             list.replaceChildren(
                 h('div', { class: 'stat-grid' },
                     statCard('已处理总数', fmtNum(data.total), 'links_already_processed')),
                 h('section', { class: 'panel' },
                     h('h2', { text: '匹配结果（最多 100 条）' }),
                     h('table', {},
-                        h('thead', {}, h('tr', {}, h('th', { text: '链接' }))),
-                        h('tbody', {}, rows.length ? rows : emptyRow(1, '没有匹配的链接')))));
+                        h('thead', {}, h('tr', {},
+                            h('th', { text: '链接' }),
+                            h('th', { text: '处理结果' }))),
+                        h('tbody', {}, rows.length ? rows : emptyRow(2, '没有匹配的链接')))));
         } catch (error) {
             list.replaceChildren(errorBox(error));
         }
@@ -349,6 +443,64 @@ async function renderProcessed(root) {
             h('button', { type: 'button', class: 'primary', onclick: load }, '搜索')),
         list);
     await load();
+}
+
+/* ---------------------------- 搜索 ------------------------------- */
+
+async function renderSearch(root) {
+    const input = h('input', { type: 'search', placeholder: '按标题搜索（Elasticsearch match）' });
+    const results = h('div');
+
+    async function run(page) {
+        const keyword = input.value.trim();
+        if (!keyword) {
+            results.replaceChildren(h('div', { class: 'empty', text: '输入关键字后回车' }));
+            return;
+        }
+        results.replaceChildren(h('div', { class: 'empty', text: '搜索中…' }));
+        try {
+            const data = await api('/api/search', { q: keyword, page: page, size: 20 });
+            renderHits(keyword, data);
+        } catch (error) {
+            results.replaceChildren(errorBox(error));
+        }
+    }
+
+    function renderHits(keyword, data) {
+        const totalPages = Math.max(1, Math.ceil(data.total / data.size));
+        const hits = data.items.map((hit) => h('article', { class: 'search-hit' },
+            h('h3', {}, h('a', { class: 'link', href: hit.url, target: '_blank', rel: 'noopener noreferrer',
+                text: hit.title || '(无标题)' })),
+            h('div', { class: 'mono muted', text: hit.url }),
+            hit.content ? h('p', { class: 'snippet', text: hit.content }) : null,
+            h('div', { class: 'muted', text: 'score ' + Number(hit.score).toFixed(2) })));
+
+        results.replaceChildren(
+            h('div', { class: 'toolbar', style: 'margin-bottom:12px' },
+                h('span', { class: 'muted',
+                    text: '「' + keyword + '」共 ' + fmtNum(data.total) + ' 条，第 ' + data.page
+                        + ' / ' + totalPages + ' 页' }),
+                h('span', { class: 'spacer' }),
+                h('button', { type: 'button', disabled: data.page <= 1, onclick: () => run(data.page - 1) }, '上一页'),
+                h('button', { type: 'button', disabled: data.page >= totalPages, onclick: () => run(data.page + 1) }, '下一页')),
+            hits.length
+                ? h('div', { class: 'search-list' }, hits)
+                : h('div', { class: 'empty', text: '没有匹配的新闻' }));
+    }
+
+    input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            run(1);
+        }
+    });
+
+    root.replaceChildren(
+        pageHead('搜索', '对 Elasticsearch 的 news 索引做 title match 查询；ES 不可用时会明确提示'),
+        h('div', { class: 'toolbar' }, input,
+            h('button', { type: 'button', class: 'primary', onclick: () => run(1) }, '搜索')),
+        h('div', { class: 'note' }, '正文在写入 ES 前被裁剪到 10 个字符，这里只作为摘要展示；完整正文请看「新闻数据」。'),
+        results);
+    results.replaceChildren(h('div', { class: 'empty', text: '输入关键字后回车' }));
 }
 
 /* ------------------------------ 日志 ----------------------------- */
@@ -825,6 +977,7 @@ const routes = {
     overview: renderOverview,
     run: renderRun,
     news: renderNews,
+    search: renderSearch,
     links: renderLinks,
     logs: renderLogs,
     settings: renderSettings

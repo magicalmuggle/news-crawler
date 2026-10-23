@@ -21,5 +21,6 @@
     <mappers>
         <mapper resource="db/mybatis/AdminMapper.xml"/>
         <mapper resource="db/mybatis/RunMapper.xml"/>
+        <mapper resource="db/mybatis/FailedLinkMapper.xml"/>
     </mappers>
 </configuration>

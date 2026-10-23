@@ -685,3 +685,35 @@ button.danger:disabled {
         gap: 2px;
     }
 }
+
+/* ------------------------------ 搜索页 ------------------------------ */
+
+.search-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.search-hit {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    background: var(--panel);
+}
+
+.search-hit h3 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.search-hit .snippet {
+    margin: 8px 0 0;
+    color: #475467;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.spacer {
+    flex: 1;
+}

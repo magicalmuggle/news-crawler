@@ -78,19 +78,22 @@ docker exec -it es /usr/share/elasticsearch/bin/elasticsearch-reset-password -u 
 ### 管理界面
 
 在 IDE 中运行 `com.github.magicalmuggle.web.AdminMain`，然后打开 <http://127.0.0.1:8080/>。
-它提供新闻浏览、链接队列、日志查看、环境自检，以及「运行」页的启动/停止和实时进度
-（线程状态、页数、熔断计数都走 SSE 每秒刷新）：
+它提供新闻浏览、链接队列、日志查看、环境自检、「运行」页的启动/停止与实时进度
+（线程状态、页数、熔断计数都走 SSE 每秒刷新），以及 Elasticsearch 搜索和失败链接重试：
 
 ```shell
 # 可选参数：换端口 / 换监听地址（默认只监听回环地址）
 # --port 8080 --bind 127.0.0.1
 ```
 
-首次使用「运行」页之前，先创建运行历史表（V3）：
+首次使用「运行」页或失败链接之前，先应用数据库迁移（V3 运行历史、V4 死链原因/失败链接表）：
 
 ```shell
 mvn flyway:migrate
 ```
+
+升级已有数据库时必须执行迁移：V4 会给 `links_already_processed` 增加 `reason` 列，
+缺这一列时爬虫写入「已处理」会失败。
 
 服务启动本身不会抓取；只有你在页面上点击「开始抓取」才会真实访问新浪并写入数据库。
 界面读取 `local.properties` 里的数据库配置和 `logs/crawler.log`，没有登录，

@@ -23,8 +23,8 @@ public final class AdminServer implements Closeable {
     private final StaticFiles staticFiles = new StaticFiles();
     private volatile boolean running;
 
-    public AdminServer(AdminDao dao, LogTailer logs, RunManager runs, int port, String bindAddress)
-            throws IOException {
+    public AdminServer(AdminDao dao, LogTailer logs, RunManager runs, FailedLinkDao failedLinks,
+            SearchService search, int port, String bindAddress) throws IOException {
         this.executor = Executors.newFixedThreadPool(WORKER_THREADS, runnable -> {
             Thread thread = new Thread(runnable, "admin-http");
             thread.setDaemon(true);
@@ -33,7 +33,8 @@ public final class AdminServer implements Closeable {
         this.server = HttpServer.create(new InetSocketAddress(bindAddress, port), 0);
         this.server.setExecutor(executor);
         this.server.createContext("/", this::handle);
-        this.routes = new ApiRoutes(dao, logs, runs, new HealthChecker(dao, logs), this::isRunning);
+        this.routes = new ApiRoutes(dao, logs, runs, failedLinks, search,
+                new HealthChecker(dao, logs), this::isRunning);
     }
 
     public void start() {

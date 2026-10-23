@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,6 +22,8 @@ import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -32,6 +35,8 @@ class AdminServerTest {
     private AdminDao dao;
     private RunDao runDao;
     private RunManager runs;
+    private FailedLinkDao failedLinkDao;
+    private SearchService search;
     private AdminServer server;
     private Path logFile;
 
@@ -50,6 +55,8 @@ class AdminServerTest {
 
         dao = new AdminDao(H2TestSupport.buildFactory());
         runDao = new RunDao(H2TestSupport.buildFactory());
+        failedLinkDao = new FailedLinkDao(H2TestSupport.buildFactory());
+        search = new FakeSearchService();
         CrawlLauncher quickLauncher = (config, session, monitor) -> new CrawlExecution() {
             @Override
             public void awaitCompletion() {
@@ -60,7 +67,7 @@ class AdminServerTest {
             }
         };
         runs = new RunManager(quickLauncher, runDao, new CrawlMonitor());
-        server = new AdminServer(dao, new LogTailer(logFile), runs, 0, "127.0.0.1");
+        server = new AdminServer(dao, new LogTailer(logFile), runs, failedLinkDao, search, 0, "127.0.0.1");
         server.start();
     }
 
@@ -77,6 +84,9 @@ class AdminServerTest {
         }
         if (runDao != null) {
             runDao.close();
+        }
+        if (failedLinkDao != null) {
+            failedLinkDao.close();
         }
     }
 
@@ -136,6 +146,34 @@ class AdminServerTest {
         Response started = request("/api/runs", "POST", "{\"threads\": 1, \"maxPages\": 5}");
         assertEquals(202, started.status);
         assertEquals(1, MAPPER.readTree(request("/api/runs", "GET").body).path("items").size());
+    }
+
+    @Test
+    void searchesNewsAndExplainsLinks() throws Exception {
+        JsonNode searchResult = MAPPER.readTree(request("/api/search?q=" + encode("足球"), "GET").body);
+        assertEquals(1, searchResult.path("total").asInt());
+        assertEquals("命中：足球", searchResult.path("items").get(0).path("title").asText());
+
+        JsonNode accepted = MAPPER.readTree(
+                request("/api/links/check?url=" + encode("https://news.sina.cn/a"), "GET").body);
+        assertTrue(accepted.path("accepted").asBoolean());
+
+        JsonNode rejected = MAPPER.readTree(
+                request("/api/links/check?url=" + encode("https://edu.sina.cn/a"), "GET").body);
+        assertFalse(rejected.path("accepted").asBoolean());
+        assertTrue(rejected.path("reason").asText().contains("edu.sina.cn"));
+    }
+
+    @Test
+    void listsAndRequeuesFailedLinks() throws Exception {
+        H2TestSupport.insertFailedLink("https://sina.cn/broken", 429, "RATE_LIMITED");
+
+        JsonNode before = MAPPER.readTree(request("/api/links/failed", "GET").body);
+        assertEquals(1, before.path("total").asInt());
+        long id = before.path("items").get(0).path("id").asLong();
+
+        assertEquals(200, request("/api/links/failed/" + id + "/requeue", "POST").status);
+        assertEquals(0, MAPPER.readTree(request("/api/links/failed", "GET").body).path("total").asInt());
     }
 
     @Test
@@ -225,6 +263,10 @@ class AdminServerTest {
         assertTrue(received.toString().contains("streamed line"), received.toString());
     }
 
+    private String encode(String value) throws Exception {
+        return URLEncoder.encode(value, "UTF-8");
+    }
+
     private Response request(String path, String method) throws IOException {
         return request(path, method, null);
     }
@@ -260,6 +302,19 @@ class AdminServerTest {
                 buffer.write(chunk, 0, read);
             }
             return new String(buffer.toByteArray(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private static final class FakeSearchService implements SearchService {
+        @Override
+        public SearchResult search(String keyword, int from, int size) {
+            List<SearchHit> hits = new ArrayList<>();
+            hits.add(new SearchHit("1", "命中：" + keyword, "https://sina.cn/1", "摘要", 1.5d));
+            return new SearchResult(hits, 1L);
+        }
+
+        @Override
+        public void close() {
         }
     }
 

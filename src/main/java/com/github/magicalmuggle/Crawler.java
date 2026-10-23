@@ -73,7 +73,7 @@ public class Crawler extends Thread {
             FetchResult result = fetchWithRetry(indexLink);
             if (result.getOutcome() == FetchResult.Outcome.OK) {
                 parseUrlsFromPageAndStoreIntoDatabase(result.getDocument());
-                dao.insertLinkAlreadyProcessed(indexLink);
+                dao.insertLinkAlreadyProcessed(indexLink, "OK");
             } else {
                 LOG.warn("index page not fetched, status {}, the queue may stay empty", result.getStatusCode());
             }
@@ -96,15 +96,19 @@ public class Crawler extends Thread {
                 case OK:
                     parseUrlsFromPageAndStoreIntoDatabase(result.getDocument());
                     storeIntoDatabaseIfItIsNewsPage(result.getDocument(), link);
-                    dao.insertLinkAlreadyProcessed(link);
+                    dao.insertLinkAlreadyProcessed(link, "OK");
                     break;
                 case DEAD:
                     LOG.info("drop dead link {} ({})", abbreviate(link), result.getStatusCode());
-                    dao.insertLinkAlreadyProcessed(link);
+                    dao.insertLinkAlreadyProcessed(link, "DEAD");
                     break;
                 default:
                     // 被拦或网络错误：不标记为已处理，下轮从首页重新发现时还有机会重爬。
-                    session.recordLinkDropped();
+                    // 手动停止导致的提前退出不算失败，也不进入丢弃计数。
+                    if (!session.isStopped()) {
+                        recordFailure(link, result);
+                        session.recordLinkDropped();
+                    }
                     break;
             }
         } catch (SQLException | PersistenceException e) {
@@ -195,10 +199,20 @@ public class Crawler extends Thread {
 
     private void markLinkAsProcessed(String link) {
         try {
-            dao.insertLinkAlreadyProcessed(link);
+            dao.insertLinkAlreadyProcessed(link, "SKIPPED");
         } catch (SQLException | PersistenceException e) {
             LOG.error("failed to mark {} as processed", abbreviate(link), e);
             throw new RuntimeException(e);
+        }
+    }
+
+    // 失败链接只记录到 failed_links，绝不写 links_already_processed；
+    // 记录失败本身出问题也不能让线程退出，否则一张表缺失就会拖垮整轮抓取。
+    private void recordFailure(String link, FetchResult result) {
+        try {
+            dao.insertFailedLink(link, result.getStatusCode(), result.getOutcome().name());
+        } catch (SQLException | PersistenceException e) {
+            LOG.warn("failed to record the failure of {}: {}", abbreviate(link), e.toString());
         }
     }
 
@@ -237,30 +251,6 @@ public class Crawler extends Thread {
     }
 
     private boolean isRequiredLink(String link) {
-        return isSinaPageLink(link)
-                && isNotExcludedPageLink(link)
-                && isNotJavaScriptLink(link)
-                && isNotPhpLink(link);
-    }
-
-    private boolean isSinaPageLink(String link) {
-        return link.contains("sina.cn");
-    }
-
-    private boolean isNotExcludedPageLink(String link) {
-        return !(link.contains("passport.sina.cn")
-                || link.contains("edu.sina.cn")
-                || link.contains("auto.sina.cn")
-                || link.contains("gu.sina.cn")
-                || link.contains("ts.gd.sina.cn")
-                || link.contains("travel.sina.cn"));
-    }
-
-    private boolean isNotJavaScriptLink(String link) {
-        return !link.toLowerCase().startsWith("javascript");
-    }
-
-    private boolean isNotPhpLink(String link) {
-        return !link.contains(".php");
+        return LinkPolicy.check(link).isAccepted();
     }
 }

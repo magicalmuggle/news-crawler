@@ -84,7 +84,23 @@ public class JdbcCrawlerDao implements CrawlerDao {
     }
 
     @Override
-    public void insertLinkAlreadyProcessed(String link) throws SQLException {
-        updateDatabase(link, "insert into links_already_processed (link) values (?)");
+    public void insertLinkAlreadyProcessed(String link, String reason) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "insert into links_already_processed (link, reason) values (?, ?)")) {
+            statement.setString(1, link);
+            statement.setString(2, reason);
+            statement.executeUpdate();
+        }
+    }
+
+    @Override
+    public void insertFailedLink(String link, int statusCode, String outcome) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "insert into failed_links (link, status_code, outcome) values (?, ?, ?)")) {
+            statement.setString(1, link);
+            statement.setInt(2, statusCode);
+            statement.setString(3, outcome);
+            statement.executeUpdate();
+        }
     }
 }

@@ -79,19 +79,23 @@ Search news by running `com.github.magicalmuggle.ElasticsearchEngine`:
 ### Admin UI
 
 Run `com.github.magicalmuggle.web.AdminMain` from your IDE and open <http://127.0.0.1:8080/>.
-It gives you news browsing, the link queue, log tailing, an environment check, and a **Run** page
-that starts and stops a crawl with live progress (threads, pages, circuit-breaker count via SSE):
+It gives you news browsing, the link queue, log tailing, an environment check, a **Run** page
+that starts and stops a crawl with live progress (threads, pages, circuit-breaker count via SSE),
+plus Elasticsearch search and failed-link retry:
 
 ```shell
 # optional: change the port / bind address (loopback only by default)
 # --port 8080 --bind 127.0.0.1
 ```
 
-Create the run-history table (V3) once before using the Run page:
+Apply the database migrations once (V3 run history, V4 dead-link reason and failed links):
 
 ```shell
 mvn flyway:migrate
 ```
+
+You must run the migrations when upgrading an existing database: V4 adds the `reason` column to
+`links_already_processed`, and the crawler cannot mark links as processed without it.
 
 Starting the server does not crawl anything; the crawl only runs when you press "开始抓取" in the UI,
 and then it really hits sina.cn and writes to the database. The UI reads the database settings from
