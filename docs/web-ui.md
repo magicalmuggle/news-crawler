@@ -1,9 +1,9 @@
 # Web UI 设计
 
-> 状态：P0（只读）已实现；P1（运行控制）与 P2（搜索 / 规则预览 / 失败重试）待做。
+> 状态：P0（只读）与 P1（运行控制）已实现；P2（搜索 / 规则预览 / 失败重试）待做。
 > 范围：为现有爬虫增加一个 Web 管理界面，覆盖「观察 → 控制 → 检索」三层能力。
 > 前置阅读：[AGENTS.md](../AGENTS.md) 的「运行时架构」与「数据层约定」两节。
-> P0 的落地细节见文末「13. P0 实现说明」。
+> P0 的落地细节见「13. P0 实现说明」，P1 见「14. P1 实现说明」。
 
 ## 1. 背景
 
@@ -447,3 +447,69 @@ P0 已实现，入口是 `com.github.magicalmuggle.web.AdminMain`，默认监听
   `/api/health` 均返回 200；新闻列表不再携带正文；`char_length` 与 `limit ?` 在 MySQL 8.4 上工作正常。
 - `mvn clean verify` 需要在 JDK 8 下运行（SpotBugs 4.5.3 的限制，见 AGENTS.md），
   已通过：29 个测试 + Checkstyle + SpotBugs。
+
+## 14. P1 实现说明
+
+P1 已完成：在同一个进程内启动/停止抓取、实时指标、运行历史。入口仍然是 `AdminMain`，
+但它只有在你于「运行」页点击「开始抓取」时才真正访问新浪，启动服务本身不会抓取。
+
+### 14.1 新增的组件
+
+| 文件 | 作用 |
+| --- | --- |
+| `web/RunManager.java` | 单例运行管理器：状态机、起停、快照、历史读写 |
+| `web/RunState.java` / `web/StopReason.java` | 运行状态与结束原因（分开记录） |
+| `web/RunSnapshot.java` | 当前运行的只读快照，`/api/runs/current` 与 SSE 返回它 |
+| `web/CrawlLauncher.java` / `web/CrawlExecution.java` | 把「怎么抓」与「怎么管状态」解耦，便于测试 |
+| `web/DefaultCrawlLauncher.java` | 真实实现：复用 `Main` 的流程（首页 → N 个 worker → join） |
+| `web/RunDao.java` / `web/RunMapper.java` / `web/RunRecord.java` | `crawl_runs` 的持久化 |
+| `db/mybatis/RunMapper.xml` | `crawl_runs` 的增改查 |
+| `db/migration/V3__Create_crawl_runs.sql` | 运行历史表 |
+| `CrawlMonitor.java` | 每个 worker 的当前链接、尝试次数、阶段（fetching / waiting / idle） |
+| `CrawlSession#requestStop` | 停止开关；`shouldContinue()` 会因此返回 false |
+
+### 14.2 运行语义
+
+- **同一时刻只允许一次运行**：`RunManager.start` 在锁内检查 `IDLE / FINISHED / FAILED`，
+  否则抛 `IllegalStateException`，API 映射成 409。
+- **停止是两段式的**：先 `CrawlSession.requestStop()` 让循环在下一轮自然退出，
+  再 `interrupt()` 唤醒正在退避 sleep 的线程。已经在途的 HTTP 请求不会被强杀，
+  最长等待一个请求超时（连接 5s / 读取 10s）。
+- **状态与原因分开**：`state` 是 `IDLE / STARTING / RUNNING / STOPPING / FINISHED / FAILED`，
+  `stopReason` 是 `COMPLETED / BUDGET_EXHAUSTED / CIRCUIT_TRIPPED / INTERRUPTED / FAILED`。
+- **历史只在开始和结束各写一次**：开始写参数快照，结束写计数与原因。进程崩溃会导致
+  `finished_at` 为空，页面显示「未正常结束」——这是有意的取舍，避免每秒写库。
+
+### 14.3 新增 API
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/runs/current` | 当前运行快照（IDLE 时 `config` 为 null） |
+| GET | `/api/runs/stream` | SSE，每秒一帧 `tick` |
+| GET | `/api/runs?limit=` | 运行历史；表缺失时返回 `available:false` |
+| GET | `/api/runs/{id}` | 单次运行详情 |
+| POST | `/api/runs` | 启动；请求体是六个参数，缺省取 `CrawlConfig.load()` |
+| POST | `/api/runs/{id}/stop` | 停止当前运行 |
+| GET | `/api/config/effective` | `crawler.*` 生效值与来源（启动表单的默认值） |
+
+界面硬上限写在 API 里，不只是前端校验：线程数 ≤ 8、`ratePerSecond` ≤ 5。
+其余参数沿用 `CrawlConfig` 构造器的校验，非法值返回 400。
+
+### 14.4 与设计稿的差异
+
+1. **历史不做周期性更新**，只在开始/结束写两次（见 14.2）。
+2. **表缺失不阻塞抓取**：`crawl_runs` 不存在时运行照常进行，只是 `runId` 为 null、历史页提示
+   先执行 `mvn flyway:migrate`。
+3. **运行页的 SSE 是常驻连接**：进入页面即连接，离开时关闭；服务端每帧只发快照，不发增量。
+4. **停止按钮按当前快照的 `runId` 调用**；若历史表不可用（`runId` 为 null）则用 0 占位，
+   服务端只校验「有活跃运行」。
+5. **`/api/overview` 增加 `run` 字段**，概览页据此显示「当前有一次抓取」的横幅。
+
+### 14.5 校验方式
+
+- `mvn test`：37 个测试。新增 `RunManagerTest`（起停、单运行约束、历史表缺失仍可运行）、
+  `RunDaoTest`（H2 上的增改查）、`AdminServerTest` 的 run 端点与 SSE。
+- `mvn clean verify`（JDK 8）通过：37 测试 + Checkstyle + SpotBugs。
+- **没有对真实站点执行抓取**：所有运行相关测试都用 `CrawlLauncher` 替身，
+  不会发出 HTTP 请求，也不会写 `news` 表。
+- 运行前需要先执行 `mvn flyway:migrate` 创建 `crawl_runs`（V3）。

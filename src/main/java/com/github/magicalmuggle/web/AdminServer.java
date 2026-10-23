@@ -23,7 +23,8 @@ public final class AdminServer implements Closeable {
     private final StaticFiles staticFiles = new StaticFiles();
     private volatile boolean running;
 
-    public AdminServer(AdminDao dao, LogTailer logs, int port, String bindAddress) throws IOException {
+    public AdminServer(AdminDao dao, LogTailer logs, RunManager runs, int port, String bindAddress)
+            throws IOException {
         this.executor = Executors.newFixedThreadPool(WORKER_THREADS, runnable -> {
             Thread thread = new Thread(runnable, "admin-http");
             thread.setDaemon(true);
@@ -32,7 +33,7 @@ public final class AdminServer implements Closeable {
         this.server = HttpServer.create(new InetSocketAddress(bindAddress, port), 0);
         this.server.setExecutor(executor);
         this.server.createContext("/", this::handle);
-        this.routes = new ApiRoutes(dao, logs, new HealthChecker(dao, logs), this::isRunning);
+        this.routes = new ApiRoutes(dao, logs, runs, new HealthChecker(dao, logs), this::isRunning);
     }
 
     public void start() {
@@ -62,12 +63,13 @@ public final class AdminServer implements Closeable {
     private void handle(HttpExchange exchange) {
         try {
             String path = exchange.getRequestURI().getPath();
-            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-                throw new ApiException(405, "only GET is supported");
-            }
+            String method = exchange.getRequestMethod();
             if (path.startsWith("/api/")) {
-                routes.handle(exchange, path);
+                routes.handle(exchange, method, path);
             } else {
+                if (!"GET".equalsIgnoreCase(method)) {
+                    throw new ApiException(405, "only GET is supported");
+                }
                 staticFiles.serve(exchange, path);
             }
         } catch (ApiException e) {

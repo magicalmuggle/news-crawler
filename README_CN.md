@@ -75,15 +75,23 @@ docker exec -it es /usr/share/elasticsearch/bin/elasticsearch-reset-password -u 
 
 [![Search-news.png](https://s1.ax1x.com/2022/05/28/XK6me1.png)](https://imgtu.com/i/XK6me1)
 
-### 只读管理界面
+### 管理界面
 
 在 IDE 中运行 `com.github.magicalmuggle.web.AdminMain`，然后打开 <http://127.0.0.1:8080/>。
-它提供新闻浏览、链接队列、日志查看和环境自检，**不会启动爬虫、也不会写数据库**：
+它提供新闻浏览、链接队列、日志查看、环境自检，以及「运行」页的启动/停止和实时进度
+（线程状态、页数、熔断计数都走 SSE 每秒刷新）：
 
 ```shell
 # 可选参数：换端口 / 换监听地址（默认只监听回环地址）
 # --port 8080 --bind 127.0.0.1
 ```
 
-界面读取 `local.properties` 里的数据库配置和 `logs/crawler.log`。
-它是只读工具、没有登录，不要绑定到公网地址；设计说明见 [docs/web-ui.md](docs/web-ui.md)。
+首次使用「运行」页之前，先创建运行历史表（V3）：
+
+```shell
+mvn flyway:migrate
+```
+
+服务启动本身不会抓取；只有你在页面上点击「开始抓取」才会真实访问新浪并写入数据库。
+界面读取 `local.properties` 里的数据库配置和 `logs/crawler.log`，没有登录，
+不要绑定到公网地址；设计说明见 [docs/web-ui.md](docs/web-ui.md)。

@@ -42,6 +42,7 @@ final class H2TestSupport {
             statement.execute("drop table if exists news");
             statement.execute("drop table if exists links_to_be_processed");
             statement.execute("drop table if exists links_already_processed");
+            statement.execute("drop table if exists crawl_runs");
             statement.execute("create table news ("
                     + "id bigint auto_increment primary key, "
                     + "title text, "
@@ -53,6 +54,22 @@ final class H2TestSupport {
                     + "id bigint auto_increment primary key, link varchar(4096))");
             statement.execute("create table links_already_processed ("
                     + "id bigint auto_increment primary key, link varchar(4096))");
+            statement.execute("create table crawl_runs ("
+                    + "id bigint auto_increment primary key, "
+                    + "started_at timestamp not null, "
+                    + "finished_at timestamp null, "
+                    + "threads int not null, "
+                    + "requests_per_second double not null, "
+                    + "max_pages int not null, "
+                    + "max_retries int not null, "
+                    + "retry_backoff_millis bigint not null, "
+                    + "circuit_breaker_threshold int not null, "
+                    + "attempted_pages int not null default 0, "
+                    + "news_stored int not null default 0, "
+                    + "dropped_links int not null default 0, "
+                    + "remaining_pages int not null default 0, "
+                    + "consecutive_blocks int not null default 0, "
+                    + "stop_reason varchar(32) null)");
         }
     }
 

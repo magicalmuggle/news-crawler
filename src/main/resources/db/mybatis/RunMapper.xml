@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 运行历史：只操作 crawl_runs 表 -->
+<mapper namespace="com.github.magicalmuggle.web.RunMapper">
+    <insert id="insertRun" parameterType="com.github.magicalmuggle.web.RunRecord"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into crawl_runs (started_at, threads, requests_per_second, max_pages, max_retries,
+            retry_backoff_millis, circuit_breaker_threshold, attempted_pages, news_stored,
+            dropped_links, remaining_pages, consecutive_blocks)
+        values (#{startedAt}, #{threads}, #{requestsPerSecond}, #{maxPages}, #{maxRetries},
+            #{retryBackoffMillis}, #{circuitBreakerThreshold}, #{attemptedPages}, #{newsStored},
+            #{droppedLinks}, #{remainingPages}, #{consecutiveBlocks})
+    </insert>
+
+    <update id="finishRun" parameterType="com.github.magicalmuggle.web.RunRecord">
+        update crawl_runs
+        set finished_at       = #{finishedAt},
+            attempted_pages   = #{attemptedPages},
+            news_stored       = #{newsStored},
+            dropped_links     = #{droppedLinks},
+            remaining_pages   = #{remainingPages},
+            consecutive_blocks = #{consecutiveBlocks},
+            stop_reason       = #{stopReason}
+        where id = #{id}
+    </update>
+
+    <select id="selectRun" resultType="com.github.magicalmuggle.web.RunRecord">
+        select * from crawl_runs where id = #{id}
+    </select>
+
+    <select id="selectRuns" resultType="com.github.magicalmuggle.web.RunRecord">
+        select * from crawl_runs order by id desc limit #{limit}
+    </select>
+</mapper>

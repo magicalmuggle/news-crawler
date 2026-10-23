@@ -2,7 +2,9 @@ package com.github.magicalmuggle.web;
 
 import com.sun.net.httpserver.HttpExchange;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
@@ -14,6 +16,7 @@ import java.util.Map;
 public final class HttpSupport {
     public static final int MAX_LIMIT = 200;
     public static final int DEFAULT_LIMIT = 50;
+    private static final int MAX_BODY_BYTES = 16 * 1024;
 
     private HttpSupport() {
     }
@@ -47,6 +50,26 @@ public final class HttpSupport {
         try (OutputStream outputStream = exchange.getResponseBody()) {
             outputStream.write(payload);
         }
+    }
+
+    public static String readBody(HttpExchange exchange) throws IOException {
+        byte[] body = readAll(exchange.getRequestBody());
+        return new String(body, StandardCharsets.UTF_8);
+    }
+
+    private static byte[] readAll(InputStream inputStream) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] chunk = new byte[4096];
+        int total = 0;
+        int read;
+        while ((read = inputStream.read(chunk)) >= 0) {
+            total += read;
+            if (total > MAX_BODY_BYTES) {
+                throw new ApiException(413, "request body is too large");
+            }
+            buffer.write(chunk, 0, read);
+        }
+        return buffer.toByteArray();
     }
 
     public static Map<String, String> queryParams(HttpExchange exchange) {

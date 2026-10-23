@@ -2,6 +2,7 @@ package com.github.magicalmuggle.web;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.magicalmuggle.CrawlMonitor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -28,6 +30,8 @@ class AdminServerTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private AdminDao dao;
+    private RunDao runDao;
+    private RunManager runs;
     private AdminServer server;
     private Path logFile;
 
@@ -45,7 +49,18 @@ class AdminServerTest {
                 StandardCharsets.UTF_8);
 
         dao = new AdminDao(H2TestSupport.buildFactory());
-        server = new AdminServer(dao, new LogTailer(logFile), 0, "127.0.0.1");
+        runDao = new RunDao(H2TestSupport.buildFactory());
+        CrawlLauncher quickLauncher = (config, session, monitor) -> new CrawlExecution() {
+            @Override
+            public void awaitCompletion() {
+            }
+
+            @Override
+            public void requestStop() {
+            }
+        };
+        runs = new RunManager(quickLauncher, runDao, new CrawlMonitor());
+        server = new AdminServer(dao, new LogTailer(logFile), runs, 0, "127.0.0.1");
         server.start();
     }
 
@@ -54,8 +69,14 @@ class AdminServerTest {
         if (server != null) {
             server.stop();
         }
+        if (runs != null) {
+            runs.close();
+        }
         if (dao != null) {
             dao.close();
+        }
+        if (runDao != null) {
+            runDao.close();
         }
     }
 
@@ -100,6 +121,24 @@ class AdminServerTest {
     }
 
     @Test
+    void servesRunEndpoints() throws Exception {
+        JsonNode idle = MAPPER.readTree(request("/api/runs/current", "GET").body);
+        assertEquals("IDLE", idle.path("state").asText());
+
+        JsonNode history = MAPPER.readTree(request("/api/runs", "GET").body);
+        assertTrue(history.path("available").asBoolean());
+        assertEquals(0, history.path("items").size());
+
+        assertEquals(400, request("/api/runs", "POST", "{\"requestsPerSecond\": 50}").status);
+        assertEquals(400, request("/api/runs", "POST", "{\"threads\": 0}").status);
+        assertEquals(409, request("/api/runs/1/stop", "POST").status);
+
+        Response started = request("/api/runs", "POST", "{\"threads\": 1, \"maxPages\": 5}");
+        assertEquals(202, started.status);
+        assertEquals(1, MAPPER.readTree(request("/api/runs", "GET").body).path("items").size());
+    }
+
+    @Test
     void servesStaticFiles() throws Exception {
         Response index = request("/", "GET");
         assertEquals(200, index.status);
@@ -126,6 +165,33 @@ class AdminServerTest {
         assertEquals("UP", body.path("database").path("status").asText());
         assertEquals(6, body.path("config").size());
         assertFalse(response.body.contains("password"));
+    }
+
+    @Test
+    void streamsRunSnapshotsOverSse() throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) URI.create(
+                "http://127.0.0.1:" + server.port() + "/api/runs/stream").toURL().openConnection();
+        connection.setConnectTimeout(5000);
+        connection.setReadTimeout(5000);
+        connection.setRequestProperty("Accept", "text/event-stream");
+
+        StringBuilder received = new StringBuilder();
+        try (InputStream stream = connection.getInputStream()) {
+            byte[] buffer = new byte[512];
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (System.nanoTime() < deadline && !received.toString().contains("\"state\":\"IDLE\"")) {
+                int read = stream.read(buffer);
+                if (read < 0) {
+                    break;
+                }
+                received.append(new String(buffer, 0, read, StandardCharsets.UTF_8));
+            }
+        } finally {
+            connection.disconnect();
+        }
+
+        assertTrue(received.toString().contains("event: tick"), received.toString());
+        assertTrue(received.toString().contains("\"state\":\"IDLE\""), received.toString());
     }
 
     @Test
@@ -160,18 +226,29 @@ class AdminServerTest {
     }
 
     private Response request(String path, String method) throws IOException {
+        return request(path, method, null);
+    }
+
+    private Response request(String path, String method, String body) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) URI.create(
                 "http://127.0.0.1:" + server.port() + path).toURL().openConnection();
         connection.setRequestMethod(method);
         connection.setConnectTimeout(5000);
         connection.setReadTimeout(5000);
         connection.setRequestProperty("Accept", "application/json");
+        if (body != null) {
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json");
+            try (OutputStream outputStream = connection.getOutputStream()) {
+                outputStream.write(body.getBytes(StandardCharsets.UTF_8));
+            }
+        }
 
         int status = connection.getResponseCode();
         InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
-        String body = stream == null ? "" : readAll(stream);
+        String responseBody = stream == null ? "" : readAll(stream);
         connection.disconnect();
-        return new Response(status, body);
+        return new Response(status, responseBody);
     }
 
     private String readAll(InputStream stream) throws IOException {

@@ -20,5 +20,6 @@
     </environments>
     <mappers>
         <mapper resource="db/mybatis/AdminMapper.xml"/>
+        <mapper resource="db/mybatis/RunMapper.xml"/>
     </mappers>
 </configuration>

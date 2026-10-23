@@ -50,12 +50,14 @@ function h(tag, props, ...children) {
     return node;
 }
 
-async function api(path, params) {
+async function api(path, params, options) {
     const pairs = Object.entries(params || {})
         .filter(([, value]) => value !== null && value !== undefined && value !== '')
         .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value));
     const query = pairs.length ? '?' + pairs.join('&') : '';
-    const response = await fetch(path + query, { headers: { Accept: 'application/json' } });
+    const init = Object.assign({}, options || {});
+    init.headers = Object.assign({ Accept: 'application/json' }, (options && options.headers) || {});
+    const response = await fetch(path + query, init);
     let data = null;
     try {
         data = await response.json();
@@ -129,7 +131,13 @@ async function renderOverview(root) {
     root.replaceChildren(
         pageHead('概览', '数据视角的现状：库里有什么、队列积压多少、日志最近说了什么'),
         h('div', { class: 'note' },
-            '当前是 P0 只读版本：只观察数据库与日志。运行中的线程、熔断状态、实时速率属于 P1（RunManager），这里暂不展示。'),
+            'P1：抓取可以在「运行」页启动和停止；概览仍是数据视角，展示库里的既有数据。'),
+        overview.run && overview.run.state !== 'IDLE'
+            ? h('div', { class: 'note' },
+                '当前有一次抓取：' + (RUN_STATE_LABELS[overview.run.state] || overview.run.state)
+                + '，已抓 ' + fmtNum(overview.run.attemptedPages) + ' 页。去 ',
+                h('a', { class: 'link', href: '#/run', text: '运行页' }), ' 查看详情。')
+            : null,
         h('div', { class: 'stat-grid' },
             statCard('新闻总数', fmtNum(overview.news.total), 'MySQL · news'),
             statCard('今日新增', fmtNum(overview.news.today), '按 created_at 统计'),
@@ -529,10 +537,293 @@ async function renderSettings(root) {
         h('p', { class: 'muted', text: '检查时间：' + fmtTime(health.checkedAt) + '（结果缓存 5 秒，密码类配置不会下发到浏览器）' }));
 }
 
+/* ------------------------------ 运行 ----------------------------- */
+
+const RUN_STATE_LABELS = {
+    IDLE: '空闲',
+    STARTING: '启动中',
+    RUNNING: '运行中',
+    STOPPING: '停止中',
+    FINISHED: '已结束',
+    FAILED: '失败'
+};
+
+const STOP_REASON_LABELS = {
+    COMPLETED: '正常完成',
+    BUDGET_EXHAUSTED: '页数用尽',
+    CIRCUIT_TRIPPED: '熔断',
+    INTERRUPTED: '手动停止',
+    FAILED: '异常失败'
+};
+
+const PHASE_LABELS = {
+    fetching: '抓取中',
+    waiting: '退避等待',
+    idle: '空闲'
+};
+
+const CONFIG_FIELD_MAP = {
+    'crawler.threads': 'threads',
+    'crawler.ratePerSecond': 'requestsPerSecond',
+    'crawler.maxPages': 'maxPages',
+    'crawler.maxRetries': 'maxRetries',
+    'crawler.retryBackoffMillis': 'retryBackoffMillis',
+    'crawler.circuitBreakerThreshold': 'circuitBreakerThreshold'
+};
+
+const RUN_FORM_FIELDS = [
+    ['threads', '线程数', 1, 8, 1],
+    ['requestsPerSecond', '速率 (req/s)', 0.1, 5, 0.1],
+    ['maxPages', '页数上限', 1, 100000, 1],
+    ['maxRetries', '重试次数', 0, 20, 1],
+    ['retryBackoffMillis', '退避基数 (ms)', 0, 600000, 100],
+    ['circuitBreakerThreshold', '熔断阈值', 1, 100, 1]
+];
+
+function fmtDuration(millis) {
+    const totalSeconds = Math.max(0, Math.round((millis || 0) / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) {
+        return hours + ' 小时 ' + minutes + ' 分';
+    }
+    if (minutes > 0) {
+        return minutes + ' 分 ' + seconds + ' 秒';
+    }
+    return seconds + ' 秒';
+}
+
+function stateBadge(state) {
+    return h('span', { class: 'badge state-' + state, text: RUN_STATE_LABELS[state] || state });
+}
+
+function progressBar(value, max, modifier) {
+    const percent = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
+    return h('div', { class: 'progress ' + (modifier || '') }, h('span', { style: 'width: ' + percent + '%' }));
+}
+
+function runStatusPanel(snapshot, onStop) {
+    const config = snapshot.config || {};
+    const maxPages = config.maxPages || 0;
+    const attempted = snapshot.attemptedPages || 0;
+    const blocks = snapshot.consecutiveBlocks || 0;
+    const threshold = config.circuitBreakerThreshold || 0;
+    const active = ['STARTING', 'RUNNING', 'STOPPING'].includes(snapshot.state);
+
+    return h('section', { class: 'panel' },
+        h('h2', { text: '当前运行' }),
+        h('div', { class: 'run-status' },
+            stateBadge(snapshot.state),
+            snapshot.runId ? h('span', { class: 'muted mono', text: 'run #' + snapshot.runId }) : null,
+            h('span', { class: 'muted',
+                text: snapshot.startedAt ? '开始于 ' + fmtTime(snapshot.startedAt) : '还没有运行记录' }),
+            snapshot.startedAt ? h('span', { class: 'muted', text: '已用 ' + fmtDuration(snapshot.elapsedMillis) }) : null,
+            snapshot.stopReason
+                ? h('span', { class: 'badge source', text: STOP_REASON_LABELS[snapshot.stopReason] || snapshot.stopReason })
+                : null,
+            active
+                ? h('button', { type: 'button', class: 'danger', disabled: snapshot.state === 'STOPPING',
+                    onclick: onStop }, snapshot.state === 'STOPPING' ? '停止中…' : '停止')
+                : null),
+        snapshot.error ? h('div', { class: 'error-box', text: snapshot.error }) : null,
+        h('div', { class: 'stat-grid', style: 'margin-top:14px' },
+            statCard('已抓取页', fmtNum(attempted), maxPages ? '上限 ' + fmtNum(maxPages) : ''),
+            statCard('入库新闻', fmtNum(snapshot.storedNews), '本次运行'),
+            statCard('丢弃链接', fmtNum(snapshot.droppedLinks), '重试耗尽'),
+            statCard('剩余额度', fmtNum(snapshot.remainingPages), '页')),
+        h('div', { class: 'progress-row' },
+            h('span', { class: 'muted', text: '页数进度' }),
+            h('span', { class: 'muted', text: fmtNum(attempted) + ' / ' + fmtNum(maxPages) })),
+        progressBar(attempted, maxPages),
+        h('div', { class: 'progress-row' },
+            h('span', { class: 'muted', text: '熔断进度（连续被拦）' }),
+            h('span', { class: 'muted', text: blocks + ' / ' + threshold })),
+        progressBar(blocks, threshold, threshold > 0 && blocks / threshold >= 0.8 ? 'bad'
+            : (threshold > 0 && blocks / threshold >= 0.5 ? 'warn' : '')),
+        h('div', { class: 'muted', style: 'margin-top:12px',
+            text: '速率 ' + (config.requestsPerSecond != null ? config.requestsPerSecond : '-') + ' req/s · '
+                + (config.threads != null ? config.threads : '-') + ' 线程 · 重试 '
+                + (config.maxRetries != null ? config.maxRetries : '-') + ' 次' }));
+}
+
+function threadsPanel(threads) {
+    const rows = (threads || []).map((thread) => h('tr', {},
+        h('td', { class: 'mono', text: thread.name }),
+        h('td', {}, h('span', { class: 'badge phase-' + thread.phase, text: PHASE_LABELS[thread.phase] || thread.phase })),
+        h('td', { class: 'mono', text: thread.attempt ? '#' + thread.attempt : '-' }),
+        h('td', { class: 'mono link-cell', text: thread.link || '-' })));
+
+    return h('section', { class: 'panel' },
+        h('h2', { text: '工作线程' }),
+        h('table', {},
+            h('thead', {}, h('tr', {},
+                h('th', { text: '线程' }),
+                h('th', { text: '状态' }),
+                h('th', { text: '尝试' }),
+                h('th', { text: '当前链接' }))),
+            h('tbody', {}, rows.length ? rows : emptyRow(4, '当前没有活跃线程'))));
+}
+
+function runForm(defaults) {
+    const inputs = {};
+    const labels = RUN_FORM_FIELDS.map(([name, label, min, max, step]) => {
+        const input = h('input', { type: 'number', name: name, min: min, max: max, step: step,
+            value: defaults[name] != null ? defaults[name] : '' });
+        inputs[name] = input;
+        return h('label', {}, h('span', { text: label }), input);
+    });
+    const error = h('div', { class: 'error-box', hidden: true });
+
+    const form = h('form', { class: 'run-form' }, labels,
+        h('div', { class: 'actions' },
+            h('button', { type: 'submit', class: 'primary' }, '开始抓取'),
+            h('button', { type: 'button', onclick: () => {
+                RUN_FORM_FIELDS.forEach(([name]) => {
+                    if (defaults[name] != null) {
+                        inputs[name].value = defaults[name];
+                    }
+                });
+            } }, '恢复默认')),
+        error);
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const payload = {};
+        RUN_FORM_FIELDS.forEach(([name]) => {
+            payload[name] = Number(inputs[name].value);
+        });
+        const summary = RUN_FORM_FIELDS.map(([name, label]) => label + '=' + inputs[name].value).join('，');
+        if (!window.confirm('确认开始抓取？\n\n' + summary
+            + '\n\n会真实访问新浪并写入数据库，受全局限速与熔断保护。')) {
+            return;
+        }
+        try {
+            await api('/api/runs', null, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        } catch (err) {
+            error.textContent = '启动失败：' + err.message;
+            error.hidden = false;
+        }
+    });
+    return form;
+}
+
+function runHistoryPanel(history) {
+    if (!history.available) {
+        return h('section', { class: 'panel' },
+            h('h2', { text: '运行历史' }),
+            h('div', { class: 'note', text: history.message || '运行历史不可用' }));
+    }
+    const rows = (history.items || []).map((run) => h('tr', {},
+        h('td', { class: 'mono', text: '#' + run.id }),
+        h('td', { text: fmtTime(run.startedAt) }),
+        h('td', { text: run.finishedAt ? fmtTime(run.finishedAt) : '未正常结束' }),
+        h('td', { text: fmtNum(run.attemptedPages) + ' / ' + fmtNum(run.maxPages) }),
+        h('td', { text: fmtNum(run.newsStored) }),
+        h('td', { text: fmtNum(run.droppedLinks) }),
+        h('td', {}, h('span', { class: 'badge source',
+            text: STOP_REASON_LABELS[run.stopReason] || run.stopReason || '-' }))));
+
+    return h('section', { class: 'panel' },
+        h('h2', { text: '运行历史' }),
+        h('table', {},
+            h('thead', {}, h('tr', {},
+                h('th', { text: 'ID' }),
+                h('th', { text: '开始' }),
+                h('th', { text: '结束' }),
+                h('th', { text: '页数' }),
+                h('th', { text: '入库' }),
+                h('th', { text: '丢弃' }),
+                h('th', { text: '结束原因' }))),
+            h('tbody', {}, rows.length ? rows : emptyRow(7, '还没有运行记录'))));
+}
+
+function defaultsFromConfig(items) {
+    const defaults = {};
+    (items || []).forEach((row) => {
+        const field = CONFIG_FIELD_MAP[row.key];
+        if (field) {
+            defaults[field] = row.value;
+        }
+    });
+    return defaults;
+}
+
+async function renderRun(root) {
+    const [current, configData, history] = await Promise.all([
+        api('/api/runs/current'),
+        api('/api/config/effective'),
+        api('/api/runs', { limit: 20 }).catch((error) => ({ available: false, items: [], message: error.message }))
+    ]);
+    const defaults = defaultsFromConfig(configData.items);
+
+    const statusSlot = h('div');
+    const threadsSlot = h('div');
+    const formSlot = h('div');
+    const historySlot = h('div');
+    let lastActive = null;
+
+    async function stopRun(snapshot) {
+        if (!window.confirm('停止当前抓取？已抓到的新闻会保留，未处理的链接会留在队列里。')) {
+            return;
+        }
+        try {
+            await api('/api/runs/' + (snapshot.runId || 0) + '/stop', null, { method: 'POST' });
+        } catch (error) {
+            window.alert('停止失败：' + error.message);
+        }
+    }
+
+    function apply(snapshot) {
+        statusSlot.replaceChildren(runStatusPanel(snapshot, () => stopRun(snapshot)));
+        threadsSlot.replaceChildren(threadsPanel(snapshot.threads));
+        const active = ['STARTING', 'RUNNING', 'STOPPING'].includes(snapshot.state);
+        if (active !== lastActive) {
+            lastActive = active;
+            formSlot.replaceChildren(active
+                ? h('section', { class: 'panel' },
+                    h('h2', { text: '开始新的抓取' }),
+                    h('p', { class: 'muted', text: '当前有任务在跑，结束后可以再开一次。' }))
+                : h('section', { class: 'panel' },
+                    h('h2', { text: '开始新的抓取' }),
+                    h('p', { class: 'muted', style: 'margin-top:-6px',
+                        text: '默认值取自 CrawlConfig 的生效配置。界面硬上限：8 线程、5 req/s。' }),
+                    runForm(defaults)));
+        }
+    }
+
+    root.replaceChildren(
+        pageHead('运行控制', '在本进程内启动/停止抓取，实时指标通过 SSE 每秒刷新'),
+        h('div', { class: 'note' },
+            '启动会真实访问新浪并写入数据库。抓取受全局限速与熔断保护，界面不提供「无限制」选项。'),
+        statusSlot,
+        threadsSlot,
+        formSlot,
+        historySlot);
+
+    apply(current);
+    historySlot.replaceChildren(runHistoryPanel(history));
+
+    const source = new EventSource('/api/runs/stream');
+    source.addEventListener('tick', (event) => {
+        try {
+            apply(JSON.parse(event.data));
+        } catch (e) {
+            /* 忽略单帧解析失败 */
+        }
+    });
+    onCleanup(() => source.close());
+}
+
 /* ------------------------------ 路由 ----------------------------- */
 
 const routes = {
     overview: renderOverview,
+    run: renderRun,
     news: renderNews,
     links: renderLinks,
     logs: renderLogs,

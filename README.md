@@ -76,17 +76,24 @@ Search news by running `com.github.magicalmuggle.ElasticsearchEngine`:
 
 [![Search-news.png](https://s1.ax1x.com/2022/05/28/XK6me1.png)](https://imgtu.com/i/XK6me1)
 
-### Read-only admin UI
+### Admin UI
 
 Run `com.github.magicalmuggle.web.AdminMain` from your IDE and open <http://127.0.0.1:8080/>.
-It gives you news browsing, the link queue, log tailing and an environment check, and it
-**never starts the crawler or writes to the database**:
+It gives you news browsing, the link queue, log tailing, an environment check, and a **Run** page
+that starts and stops a crawl with live progress (threads, pages, circuit-breaker count via SSE):
 
 ```shell
 # optional: change the port / bind address (loopback only by default)
 # --port 8080 --bind 127.0.0.1
 ```
 
-It reads the database settings from `local.properties` and the log file at `logs/crawler.log`.
-The UI has no authentication, so do not bind it to a public address.
-See [docs/web-ui.md](docs/web-ui.md) for the design notes.
+Create the run-history table (V3) once before using the Run page:
+
+```shell
+mvn flyway:migrate
+```
+
+Starting the server does not crawl anything; the crawl only runs when you press "开始抓取" in the UI,
+and then it really hits sina.cn and writes to the database. The UI reads the database settings from
+`local.properties` and the log file at `logs/crawler.log`. It has no authentication, so do not bind it
+to a public address. See [docs/web-ui.md](docs/web-ui.md) for the design notes.

@@ -2,6 +2,7 @@ package com.github.magicalmuggle;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 // 一次抓取运行的共享状态：限速、熔断、页数预算和统计。
@@ -16,6 +17,7 @@ public final class CrawlSession implements Closeable {
     private final AtomicInteger attemptedPages = new AtomicInteger();
     private final AtomicInteger storedNews = new AtomicInteger();
     private final AtomicInteger droppedLinks = new AtomicInteger();
+    private final AtomicBoolean stopped = new AtomicBoolean();
 
     public CrawlSession(CrawlConfig config) {
         this.throttle = new CrawlThrottle(config.requestsPerSecond());
@@ -26,9 +28,19 @@ public final class CrawlSession implements Closeable {
         this.remainingPages = new AtomicInteger(config.maxPages());
     }
 
-    // 熔断或页数预算用完时返回 false，所有线程据此退出循环。
+    // 熔断、页数预算用完或被要求停止时返回 false，所有线程据此退出循环。
     public boolean shouldContinue() {
-        return !circuitBreaker.isTripped() && remainingPages.get() > 0;
+        return !stopped.get() && !circuitBreaker.isTripped() && remainingPages.get() > 0;
+    }
+
+    // 供 Web 界面的「停止」使用。只置标志，不打断正在进行的请求；
+    // 要立刻唤醒退避中的线程，调用方还需要 interrupt 对应线程。
+    public void requestStop() {
+        stopped.set(true);
+    }
+
+    public boolean isStopped() {
+        return stopped.get();
     }
 
     // 成功领取一次"页面额度"才返回 true；失败（被拦、超时）不消耗额度。

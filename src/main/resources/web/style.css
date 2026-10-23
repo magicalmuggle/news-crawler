@@ -525,6 +525,144 @@ a.link:hover {
     text-decoration: underline;
 }
 
+/* ------------------------------ 运行页 ------------------------------ */
+
+.run-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+button.danger {
+    margin-left: auto;
+    background: var(--bad-soft);
+    border-color: #f3c6c6;
+    color: var(--bad);
+}
+
+button.danger:hover {
+    background: #fbdada;
+}
+
+button.danger:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.badge.state-RUNNING {
+    background: var(--ok-soft);
+    color: var(--ok);
+}
+
+.badge.state-STARTING {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.badge.state-STOPPING {
+    background: var(--warn-soft);
+    color: var(--warn);
+}
+
+.badge.state-FINISHED,
+.badge.state-IDLE {
+    background: #f2f4f7;
+    color: #475467;
+}
+
+.badge.state-FAILED {
+    background: var(--bad-soft);
+    color: var(--bad);
+}
+
+.badge.phase-fetching {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.badge.phase-waiting {
+    background: var(--warn-soft);
+    color: var(--warn);
+}
+
+.badge.phase-idle {
+    background: #f2f4f7;
+    color: #475467;
+}
+
+.progress-row {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 12px;
+    font-size: 12px;
+}
+
+.progress {
+    height: 8px;
+    margin-top: 6px;
+    border-radius: 999px;
+    background: #eef0f3;
+    overflow: hidden;
+}
+
+.progress > span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.4s ease;
+}
+
+.progress.warn > span {
+    background: #d97706;
+}
+
+.progress.bad > span {
+    background: var(--bad);
+}
+
+.run-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px;
+    margin-top: 6px;
+}
+
+.run-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.run-form input {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font: inherit;
+    color: var(--text);
+}
+
+.run-form .actions {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 8px;
+}
+
+.run-form .error-box {
+    grid-column: 1 / -1;
+    margin: 0;
+}
+
+.link-cell {
+    max-width: 640px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .split {
     display: grid;
     grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);

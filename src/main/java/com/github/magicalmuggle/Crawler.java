@@ -20,15 +20,24 @@ public class Crawler extends Thread {
 
     private final CrawlerDao dao;
     private final CrawlSession session;
+    private final CrawlMonitor monitor;
+
+    public Crawler(CrawlerDao dao, CrawlSession session) {
+        this(dao, session, null);
+    }
 
     @SuppressFBWarnings("EI_EXPOSE_REP2")
-    public Crawler(CrawlerDao dao, CrawlSession session) {
+    public Crawler(CrawlerDao dao, CrawlSession session, CrawlMonitor monitor) {
         this.dao = dao;
         this.session = session;
+        this.monitor = monitor;
     }
 
     @Override
     public void run() {
+        if (monitor != null) {
+            monitor.register(getName());
+        }
         try {
             while (session.shouldContinue()) {
                 String link = dao.getNextLinkThenDelete();
@@ -39,10 +48,17 @@ public class Crawler extends Thread {
                     continue;
                 }
                 processLink(link);
+                if (monitor != null) {
+                    monitor.idle(getName());
+                }
             }
         } catch (SQLException | PersistenceException e) {
             LOG.error("database failure while reading the link queue", e);
             throw new RuntimeException(e);
+        } finally {
+            if (monitor != null) {
+                monitor.unregister(getName());
+            }
         }
     }
 
@@ -110,6 +126,9 @@ public class Crawler extends Thread {
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             if (attempt > 1) {
+                if (monitor != null) {
+                    monitor.waiting(getName(), link);
+                }
                 sleepMillis(waitMillis);
                 if (Thread.currentThread().isInterrupted()) {
                     break;
@@ -120,6 +139,9 @@ public class Crawler extends Thread {
             }
             session.acquireSlot();
             LOG.info("fetch {} (attempt {}/{})", abbreviate(link), attempt, maxAttempts);
+            if (monitor != null) {
+                monitor.fetching(getName(), link, attempt);
+            }
             try {
                 last = session.fetch(link);
             } catch (IOException e) {

@@ -1,11 +1,13 @@
 package com.github.magicalmuggle.web;
 
+import com.github.magicalmuggle.CrawlMonitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
-// 只读管理界面的入口。和 Main 完全独立：它不启动爬虫，也不写数据库。
+// 管理界面的入口。P0 时它只读；P1 起它也能在本进程内启动/停止抓取，
+// 但不会在启动时自动开跑：必须由用户在「运行」页显式触发。
 public final class AdminMain {
     private static final Logger LOG = LoggerFactory.getLogger(AdminMain.class);
     private static final int DEFAULT_PORT = 8080;
@@ -28,25 +30,34 @@ public final class AdminMain {
         }
 
         AdminDao dao = new AdminDao();
+        RunDao runDao = new RunDao();
         LogTailer logs = new LogTailer(LogTailer.defaultLogFile());
+        CrawlMonitor monitor = new CrawlMonitor();
+        RunManager runs = new RunManager(new DefaultCrawlLauncher(), runDao, monitor);
         try {
-            AdminServer server = new AdminServer(dao, logs, port, bind);
+            AdminServer server = new AdminServer(dao, logs, runs, port, bind);
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 server.stop();
+                runs.close();
                 dao.close();
+                runDao.close();
             }, "admin-shutdown"));
             server.start();
             LOG.info("admin ui listening on http://{}:{}/", bind, server.port());
             LOG.info("log file: {}", logs.logFile().toAbsolutePath());
-            LOG.warn("read-only, no authentication: only bind to 127.0.0.1 or a trusted network");
+            LOG.warn("no authentication: only bind to 127.0.0.1 or a trusted network");
             Thread.currentThread().join();
         } catch (IOException e) {
             LOG.error("failed to start the admin ui on {}:{}: {}", bind, port, e.getMessage());
+            runs.close();
             dao.close();
+            runDao.close();
             System.exit(1);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            runs.close();
             dao.close();
+            runDao.close();
         }
     }
 
