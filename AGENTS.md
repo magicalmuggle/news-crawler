@@ -15,6 +15,7 @@
 | 数据访问 | MyBatis 3.5.9 + MySQL 8（`mysql-connector-java` 8.0.29） |
 | 建表 | Flyway 8.5.10（Maven 插件） |
 | HTTP / 解析 | Apache HttpClient 5.1.3、Jsoup 1.14.3 |
+| Web 服务 | 内嵌 Jetty 9.4 + Servlet 3.1（管理界面）；**不要再用 `com.sun.net.httpserver`** |
 | 搜索 | Elasticsearch Java Client 8.2.1（HTTPS + CA 证书 + Basic Auth） |
 | 测试 | JUnit 5（junit-jupiter 5.8.2）、Surefire 2.22.1 |
 | 质量门禁 | Checkstyle 8.29、SpotBugs 4.5.3.0，均在 `verify` 阶段执行 |
@@ -45,6 +46,10 @@ mvn flyway:migrate          # 执行数据库迁移（需要可用的 MySQL）
   `JAVA_HOME=/usr/lib/jvm/jdk8u412 mvn -o test-compile spotbugs:check`。
 - **JDK 版本**：本机默认 JDK 21，能编译 `-source 8`（会有 obsolete 警告），但源码里**不要使用
   Java 8 以上的 API**（如 `var`、`List.of`、`Stream.toList`、新日期 API 之外的新类）。
+- **不要用 JDK 的 `com.sun.*` API**（典型例子是 `com.sun.net.httpserver.HttpServer`）：javac 能编过、
+  Maven 也不报错，但 VSCode 的 Java 扩展（Eclipse 编译器）会报
+  `Access restriction: ... restriction on required library .../rt.jar`，而 IDEA 不报，很容易误判。
+  需要 HTTP 服务时用内嵌 Jetty（`AdminServer`），需要测试桩时用 `StubHttpServer`。
 - **运行入口**：仓库没有配置 `exec-maven-plugin` / `shade`，请直接在 IDE 中运行对应 `main` 类；
   不要为了跑程序往 `pom.xml` 里加插件。
 - 后台任务 / 长输出较多是常态：`MockDataGenerator` 会刷一百万行进度，`verify` 输出也很长，
@@ -84,7 +89,7 @@ src/main/java/com/github/magicalmuggle/
 ├── ElasticsearchDataGenerator.java # MySQL → Elasticsearch
 ├── web/                            # Web 管理界面（P0 只读 + P1 起停 + P2 搜索/重试）
 │   ├── AdminMain.java              # 入口：--port / --bind，默认 127.0.0.1:8080
-│   ├── AdminServer.java            # JDK HttpServer：路由、静态文件、错误处理
+│   ├── AdminServer.java            # 内嵌 Jetty：路由、静态文件、错误处理
 │   ├── ApiRoutes.java              # API：overview/news/links/logs/health/runs/search
 │   ├── AdminDao.java               # 只读查询（复用单例 SqlSessionFactory）
 │   ├── AdminMapper.java            # MyBatis Mapper 接口
@@ -118,6 +123,7 @@ src/main/resources/web/                                 # 管理界面静态文�
 src/main/resources/logback.xml                          # 日志：控制台 + 滚动文件
 src/test/java/com/github/magicalmuggle/SmokeTest.java   # 空测试
 src/test/java/com/github/magicalmuggle/FakeCrawlerDao.java         # 测试用 DAO 替身，不连数据库
+src/test/java/com/github/magicalmuggle/StubHttpServer.java         # 测试用固定响应 HTTP 桩（内嵌 Jetty）
 src/test/java/com/github/magicalmuggle/CrawlerResilienceTest.java  # 单条链接失败不影响线程
 src/test/java/com/github/magicalmuggle/CrawlerBackoffTest.java     # 429 不标记已处理 / 404 标记
 src/test/java/com/github/magicalmuggle/CrawlThrottleTest.java      # 限速间隔与抖动边界
@@ -202,7 +208,8 @@ sina.cn ──HTTP──> Crawler（多个线程）
   （`links_to_be_processed` / `links_already_processed`），**绝不要传外部输入**（SQL 注入）。
 - `MockMapper.selectNews` 固定 `limit 1000`；`ElasticsearchDataGenerator` 会把这个结果集
   重复写入 1000 次，所以「1000 条 × 16 线程 × 1000 批」≈ 1600 万文档，别在生产 ES 上试。
-- 测试现状：`SmokeTest` 是空测试；其余测试用本地 `HttpServer` + `FakeCrawlerDao`，
+- 测试现状：`SmokeTest` 是空测试；其余测试用本地 `StubHttpServer`（内嵌 Jetty 的固定响应桩）
+  + `FakeCrawlerDao`，
   不连数据库：`CrawlerResilienceTest`（单条失败不影响线程）、`CrawlerBackoffTest`
   （429 不标记已处理、404 标记）、`CrawlThrottleTest`、`CircuitBreakerTest`、`CrawlConfigTest`。
   涉及退避的测试把 `retryBackoffMillis` 设成 1ms，别让它真的等几秒。

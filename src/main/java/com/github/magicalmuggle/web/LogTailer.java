@@ -1,7 +1,5 @@
 package com.github.magicalmuggle.web;
 
-import com.sun.net.httpserver.HttpExchange;
-
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
@@ -71,16 +69,8 @@ public final class LogTailer {
     }
 
     // SSE：先把当前文件当作基线，之后只推送新增内容。客户端断开时抛出 IOException，由调用方忽略。
-    public void stream(HttpExchange exchange, BooleanSupplier running) throws IOException {
-        exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
-        exchange.getResponseHeaders().set("Cache-Control", "no-cache");
-        exchange.getResponseHeaders().set("Connection", "keep-alive");
-        exchange.getResponseHeaders().set("X-Accel-Buffering", "no");
-        exchange.sendResponseHeaders(200, 0);
-
-        OutputStream outputStream = exchange.getResponseBody();
-        outputStream.write(": connected\n\n".getBytes(StandardCharsets.UTF_8));
-        outputStream.flush();
+    public void stream(HttpSupport http, BooleanSupplier running) throws IOException {
+        OutputStream outputStream = http.startEventStream();
         StringBuilder carry = new StringBuilder();
         long position = size();
         int idleTicks = 0;

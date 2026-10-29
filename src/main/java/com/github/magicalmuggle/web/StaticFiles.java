@@ -1,7 +1,5 @@
 package com.github.magicalmuggle.web;
 
-import com.sun.net.httpserver.HttpExchange;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,18 +22,19 @@ public final class StaticFiles {
         CONTENT_TYPES.put("css", "text/css; charset=utf-8");
     }
 
-    public void serve(HttpExchange exchange, String path) throws IOException {
+    public void serve(HttpSupport http) throws IOException {
+        String path = http.path();
         String name = path.equals("/") || path.isEmpty() ? "index.html" : path.substring(1);
         if (!ALLOWED.contains(name)) {
-            HttpSupport.sendError(exchange, 404, "not found");
+            http.sendError(404, "not found");
             return;
         }
         byte[] content = readResource(name);
         if (content == null) {
-            HttpSupport.sendError(exchange, 404, "not found");
+            http.sendError(404, "not found");
             return;
         }
-        HttpSupport.sendText(exchange, 200, contentTypeOf(name), new String(content, StandardCharsets.UTF_8));
+        http.sendText(200, contentTypeOf(name), new String(content, StandardCharsets.UTF_8));
     }
 
     private String contentTypeOf(String name) {

@@ -1,12 +1,8 @@
 package com.github.magicalmuggle;
 
-import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
 import java.net.ServerSocket;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -17,19 +13,10 @@ class CrawlerResilienceTest {
 
     @Test
     void keepsWorkingAfterOneLinkFails() throws Exception {
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/news", exchange -> {
-            byte[] body = "<html><body><article><h1>title</h1><p>content</p></article></body></html>"
-                    .getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
-            exchange.sendResponseHeaders(200, body.length);
-            try (OutputStream outputStream = exchange.getResponseBody()) {
-                outputStream.write(body);
-            }
-        });
-        server.start();
+        StubHttpServer server = new StubHttpServer(200,
+                "<html><body><article><h1>title</h1><p>content</p></article></body></html>");
         try {
-            int workingPort = server.getAddress().getPort();
+            int workingPort = server.port();
             int closedPort = findClosedPort();
             String brokenLink = "http://127.0.0.1:" + closedPort + "/news";
             String goodLink = "http://127.0.0.1:" + workingPort + "/news";
@@ -49,7 +36,7 @@ class CrawlerResilienceTest {
                 assertEquals(1, session.droppedLinks());
             }
         } finally {
-            server.stop(0);
+            server.close();
         }
     }
 

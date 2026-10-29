@@ -1,11 +1,7 @@
 package com.github.magicalmuggle;
 
-import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -16,7 +12,7 @@ class CrawlerBackoffTest {
 
     @Test
     void rateLimitedResponseIsNotMarkedAsProcessed() throws Exception {
-        HttpServer server = startServer(429, "rate limited");
+        StubHttpServer server = startServer(429, "rate limited");
         try {
             String link = linkFor(server);
             FakeCrawlerDao dao = new FakeCrawlerDao(Collections.singletonList(link));
@@ -34,13 +30,13 @@ class CrawlerBackoffTest {
                 assertEquals("RATE_LIMITED", dao.failedLinks.get(0)[2]);
             }
         } finally {
-            server.stop(0);
+            server.close();
         }
     }
 
     @Test
     void notFoundLinkIsMarkedAsProcessed() throws Exception {
-        HttpServer server = startServer(404, "not found");
+        StubHttpServer server = startServer(404, "not found");
         try {
             String link = linkFor(server);
             FakeCrawlerDao dao = new FakeCrawlerDao(Collections.singletonList(link));
@@ -58,7 +54,7 @@ class CrawlerBackoffTest {
                 assertEquals(0, session.droppedLinks());
             }
         } finally {
-            server.stop(0);
+            server.close();
         }
     }
 
@@ -67,21 +63,11 @@ class CrawlerBackoffTest {
         return new CrawlConfig(1, 1000.0d, 10, 1, 1L, 2);
     }
 
-    private static HttpServer startServer(int status, String bodyText) throws Exception {
-        byte[] body = bodyText.getBytes(StandardCharsets.UTF_8);
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/news", exchange -> {
-            exchange.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
-            exchange.sendResponseHeaders(status, body.length);
-            try (OutputStream outputStream = exchange.getResponseBody()) {
-                outputStream.write(body);
-            }
-        });
-        server.start();
-        return server;
+    private static StubHttpServer startServer(int status, String bodyText) throws Exception {
+        return new StubHttpServer(status, bodyText);
     }
 
-    private static String linkFor(HttpServer server) {
-        return "http://127.0.0.1:" + server.getAddress().getPort() + "/news";
+    private static String linkFor(StubHttpServer server) {
+        return "http://127.0.0.1:" + server.port() + "/news";
     }
 }

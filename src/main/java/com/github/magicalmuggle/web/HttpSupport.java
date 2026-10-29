@@ -1,6 +1,9 @@
 package com.github.magicalmuggle.web;
 
-import com.sun.net.httpserver.HttpExchange;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -12,48 +15,78 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-// HttpExchange 的收发细节集中在这里，路由代码只关心业务。
+// Servlet 的收发细节集中在这里，路由代码只关心业务。
 public final class HttpSupport {
     public static final int MAX_LIMIT = 200;
     public static final int DEFAULT_LIMIT = 50;
     private static final int MAX_BODY_BYTES = 16 * 1024;
+    private static final byte[] SSE_CONNECTED = ": connected\n\n".getBytes(StandardCharsets.UTF_8);
 
-    private HttpSupport() {
+    private final HttpServletRequest request;
+    private final HttpServletResponse response;
+
+    // 只做一层请求/响应适配，生命周期由容器控制。
+    @SuppressFBWarnings("EI_EXPOSE_REP2")
+    public HttpSupport(HttpServletRequest request, HttpServletResponse response) {
+        this.request = request;
+        this.response = response;
     }
 
-    public static void sendJson(HttpExchange exchange, int status, Object body) throws IOException {
-        sendBytes(exchange, status, "application/json; charset=utf-8", Json.toBytes(body));
+    public String method() {
+        return request.getMethod();
     }
 
-    public static void sendText(HttpExchange exchange, int status, String contentType, String body)
-            throws IOException {
-        sendBytes(exchange, status, contentType, body.getBytes(StandardCharsets.UTF_8));
+    public String path() {
+        return request.getRequestURI();
     }
 
-    public static void sendError(HttpExchange exchange, int status, String message) {
+    public void sendJson(int status, Object body) throws IOException {
+        sendBytes(status, "application/json; charset=utf-8", Json.toBytes(body));
+    }
+
+    public void sendText(int status, String contentType, String body) throws IOException {
+        sendBytes(status, contentType, body.getBytes(StandardCharsets.UTF_8));
+    }
+
+    public void sendError(int status, String message) {
+        // 响应可能已经开始（例如 SSE），此时只能断开连接。
+        if (response.isCommitted()) {
+            return;
+        }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("message", message);
         try {
-            sendJson(exchange, status, body);
+            sendJson(status, body);
         } catch (IOException e) {
-            // 响应可能已经开始（例如 SSE），此时只能断开连接。
-            exchange.close();
+            // 客户端已提前断开
         }
     }
 
-    private static void sendBytes(HttpExchange exchange, int status, String contentType, byte[] payload)
-            throws IOException {
-        exchange.getResponseHeaders().set("Content-Type", contentType);
-        exchange.getResponseHeaders().set("Cache-Control", "no-store");
-        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-        exchange.sendResponseHeaders(status, payload.length);
-        try (OutputStream outputStream = exchange.getResponseBody()) {
-            outputStream.write(payload);
-        }
+    // SSE 的响应头在这里一次性写好，两个流式接口共用。
+    public OutputStream startEventStream() throws IOException {
+        response.setStatus(HttpServletResponse.SC_OK);
+        response.setContentType("text/event-stream; charset=utf-8");
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("X-Accel-Buffering", "no");
+        OutputStream outputStream = response.getOutputStream();
+        outputStream.write(SSE_CONNECTED);
+        outputStream.flush();
+        return outputStream;
     }
 
-    public static String readBody(HttpExchange exchange) throws IOException {
-        byte[] body = readAll(exchange.getRequestBody());
+    private void sendBytes(int status, String contentType, byte[] payload) throws IOException {
+        response.setStatus(status);
+        response.setContentType(contentType);
+        response.setHeader("Cache-Control", "no-store");
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setContentLength(payload.length);
+        OutputStream outputStream = response.getOutputStream();
+        outputStream.write(payload);
+        outputStream.flush();
+    }
+
+    public String readBody() throws IOException {
+        byte[] body = readAll(request.getInputStream());
         return new String(body, StandardCharsets.UTF_8);
     }
 
@@ -72,9 +105,9 @@ public final class HttpSupport {
         return buffer.toByteArray();
     }
 
-    public static Map<String, String> queryParams(HttpExchange exchange) {
+    public Map<String, String> queryParams() {
         Map<String, String> params = new LinkedHashMap<>();
-        String rawQuery = exchange.getRequestURI().getRawQuery();
+        String rawQuery = request.getQueryString();
         if (rawQuery == null || rawQuery.isEmpty()) {
             return params;
         }

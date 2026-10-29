@@ -3,7 +3,6 @@ package com.github.magicalmuggle.web;
 import com.github.magicalmuggle.CrawlConfig;
 import com.github.magicalmuggle.LinkPolicy;
 import com.github.magicalmuggle.News;
-import com.sun.net.httpserver.HttpExchange;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 import java.io.IOException;
@@ -46,86 +45,88 @@ public final class ApiRoutes {
         this.running = running;
     }
 
-    public void handle(HttpExchange exchange, String method, String path) throws IOException {
+    public void handle(HttpSupport http) throws IOException {
+        String method = http.method();
+        String path = http.path();
         if ("/api/runs".equals(path)) {
-            handleRunsCollection(exchange, method);
+            handleRunsCollection(http, method);
             return;
         }
         if ("/api/runs/current".equals(path)) {
             requireGet(method);
-            HttpSupport.sendJson(exchange, 200, runs.snapshot());
+            http.sendJson(200, runs.snapshot());
             return;
         }
         if ("/api/runs/stream".equals(path)) {
             requireGet(method);
-            streamRuns(exchange);
+            streamRuns(http);
             return;
         }
         if (path.startsWith("/api/runs/")) {
-            handleRunAction(exchange, method, path);
+            handleRunAction(http, method, path);
             return;
         }
         if ("/api/links/failed".equals(path)) {
             requireGet(method);
-            failedLinksReport(exchange, HttpSupport.queryParams(exchange));
+            failedLinksReport(http, http.queryParams());
             return;
         }
         if (path.startsWith("/api/links/failed/")) {
-            handleRequeue(exchange, method, path);
+            handleRequeue(http, method, path);
             return;
         }
 
         requireGet(method);
-        Map<String, String> params = HttpSupport.queryParams(exchange);
+        Map<String, String> params = http.queryParams();
         switch (path) {
             case "/api/overview":
-                overview(exchange);
+                overview(http);
                 break;
             case "/api/news":
-                news(exchange, params);
+                news(http, params);
                 break;
             case "/api/links/pending":
-                pendingLinks(exchange, params);
+                pendingLinks(http, params);
                 break;
             case "/api/links/processed":
-                processedLinks(exchange, params);
+                processedLinks(http, params);
                 break;
             case "/api/logs":
-                logEntries(exchange, params);
+                logEntries(http, params);
                 break;
             case "/api/logs/stream":
-                logs.stream(exchange, running);
+                logs.stream(http, running);
                 break;
             case "/api/health":
-                HttpSupport.sendJson(exchange, 200, health.check());
+                http.sendJson(200, health.check());
                 break;
             case "/api/config/effective":
-                configEffective(exchange);
+                configEffective(http);
                 break;
             case "/api/search":
-                searchNews(exchange, params);
+                searchNews(http, params);
                 break;
             case "/api/links/check":
-                checkLink(exchange, params);
+                checkLink(http, params);
                 break;
             default:
                 if (path.startsWith("/api/news/")) {
-                    newsDetail(exchange, path);
+                    newsDetail(http, path);
                 } else {
                     throw new ApiException(404, "unknown endpoint: " + path);
                 }
         }
     }
 
-    private void handleRunsCollection(HttpExchange exchange, String method) throws IOException {
+    private void handleRunsCollection(HttpSupport http, String method) throws IOException {
         if ("POST".equalsIgnoreCase(method)) {
-            startRun(exchange);
+            startRun(http);
             return;
         }
         if (!"GET".equalsIgnoreCase(method)) {
             throw new ApiException(405, "method not allowed");
         }
-        int limit = HttpSupport.limitParam(HttpSupport.queryParams(exchange));
+        int limit = HttpSupport.limitParam(http.queryParams());
         Map<String, Object> body = new LinkedHashMap<>();
         try {
             body.put("available", true);
@@ -135,10 +136,10 @@ public final class ApiRoutes {
             body.put("items", Collections.emptyList());
             body.put("message", "crawl_runs 表不可用，请先执行 mvn flyway:migrate");
         }
-        HttpSupport.sendJson(exchange, 200, body);
+        http.sendJson(200, body);
     }
 
-    private void handleRunAction(HttpExchange exchange, String method, String path) throws IOException {
+    private void handleRunAction(HttpSupport http, String method, String path) throws IOException {
         String rest = path.substring("/api/runs/".length());
         int slash = rest.indexOf('/');
         if (slash < 0) {
@@ -153,7 +154,7 @@ public final class ApiRoutes {
             if (record == null) {
                 throw new ApiException(404, "run not found");
             }
-            HttpSupport.sendJson(exchange, 200, record);
+            http.sendJson(200, record);
             return;
         }
         if (!"POST".equalsIgnoreCase(method)) {
@@ -162,13 +163,13 @@ public final class ApiRoutes {
         if (!"stop".equals(rest.substring(slash + 1))) {
             throw new ApiException(404, "unknown endpoint: " + path);
         }
-        stopRun(exchange, parseId(rest.substring(0, slash)));
+        stopRun(http, parseId(rest.substring(0, slash)));
     }
 
-    private void startRun(HttpExchange exchange) throws IOException {
+    private void startRun(HttpSupport http) throws IOException {
         StartRunRequest request;
         try {
-            request = Json.read(HttpSupport.readBody(exchange), StartRunRequest.class);
+            request = Json.read(http.readBody(), StartRunRequest.class);
         } catch (IllegalArgumentException e) {
             throw new ApiException(400, "请求体不是合法的 JSON");
         }
@@ -199,10 +200,10 @@ public final class ApiRoutes {
         } catch (IllegalStateException e) {
             throw new ApiException(409, e.getMessage());
         }
-        HttpSupport.sendJson(exchange, 202, runs.snapshot());
+        http.sendJson(202, runs.snapshot());
     }
 
-    private void stopRun(HttpExchange exchange, long id) throws IOException {
+    private void stopRun(HttpSupport http, long id) throws IOException {
         RunSnapshot current = runs.snapshot();
         if (!current.getState().isActive()) {
             throw new ApiException(409, "当前没有运行中的任务");
@@ -215,19 +216,11 @@ public final class ApiRoutes {
         } catch (IllegalStateException e) {
             throw new ApiException(409, e.getMessage());
         }
-        HttpSupport.sendJson(exchange, 200, runs.snapshot());
+        http.sendJson(200, runs.snapshot());
     }
 
-    private void streamRuns(HttpExchange exchange) throws IOException {
-        exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
-        exchange.getResponseHeaders().set("Cache-Control", "no-cache");
-        exchange.getResponseHeaders().set("Connection", "keep-alive");
-        exchange.getResponseHeaders().set("X-Accel-Buffering", "no");
-        exchange.sendResponseHeaders(200, 0);
-
-        OutputStream outputStream = exchange.getResponseBody();
-        outputStream.write(": connected\n\n".getBytes(StandardCharsets.UTF_8));
-        outputStream.flush();
+    private void streamRuns(HttpSupport http) throws IOException {
+        OutputStream outputStream = http.startEventStream();
         try {
             while (running.getAsBoolean() && !Thread.currentThread().isInterrupted()) {
                 String payload = new String(Json.toBytes(runs.snapshot()), StandardCharsets.UTF_8);
@@ -247,7 +240,7 @@ public final class ApiRoutes {
         }
     }
 
-    private void handleRequeue(HttpExchange exchange, String method, String path) throws IOException {
+    private void handleRequeue(HttpSupport http, String method, String path) throws IOException {
         if (!"POST".equalsIgnoreCase(method)) {
             throw new ApiException(405, "method not allowed");
         }
@@ -268,10 +261,10 @@ public final class ApiRoutes {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("requeued", true);
         body.put("id", id);
-        HttpSupport.sendJson(exchange, 200, body);
+        http.sendJson(200, body);
     }
 
-    private void failedLinksReport(HttpExchange exchange, Map<String, String> params) throws IOException {
+    private void failedLinksReport(HttpSupport http, Map<String, String> params) throws IOException {
         int limit = HttpSupport.limitParam(params);
         Map<String, Object> body = new LinkedHashMap<>();
         try {
@@ -280,10 +273,10 @@ public final class ApiRoutes {
         } catch (RuntimeException e) {
             throw new ApiException(503, "failed_links 表不可用，请先执行 mvn flyway:migrate");
         }
-        HttpSupport.sendJson(exchange, 200, body);
+        http.sendJson(200, body);
     }
 
-    private void searchNews(HttpExchange exchange, Map<String, String> params) throws IOException {
+    private void searchNews(HttpSupport http, Map<String, String> params) throws IOException {
         String keyword = truncate(HttpSupport.stringParam(params, "q"));
         if (keyword == null) {
             throw new ApiException(400, "q is required");
@@ -297,13 +290,13 @@ public final class ApiRoutes {
             body.put("total", result.getTotal());
             body.put("page", page);
             body.put("size", size);
-            HttpSupport.sendJson(exchange, 200, body);
+            http.sendJson(200, body);
         } catch (IOException | RuntimeException e) {
             throw new ApiException(503, "搜索服务不可用：" + rootMessage(e));
         }
     }
 
-    private void checkLink(HttpExchange exchange, Map<String, String> params) throws IOException {
+    private void checkLink(HttpSupport http, Map<String, String> params) throws IOException {
         String url = HttpSupport.stringParam(params, "url");
         if (url == null) {
             throw new ApiException(400, "url is required");
@@ -315,16 +308,16 @@ public final class ApiRoutes {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("accepted", decision.isAccepted());
         body.put("reason", decision.getReason());
-        HttpSupport.sendJson(exchange, 200, body);
+        http.sendJson(200, body);
     }
 
-    private void configEffective(HttpExchange exchange) throws IOException {
+    private void configEffective(HttpSupport http) throws IOException {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("items", ConfigReport.rows());
-        HttpSupport.sendJson(exchange, 200, body);
+        http.sendJson(200, body);
     }
 
-    private void overview(HttpExchange exchange) throws IOException {
+    private void overview(HttpSupport http) throws IOException {
         Map<String, Object> news = new LinkedHashMap<>();
         news.put("total", query(dao::countNews));
         news.put("today", query(() -> dao.countNewsSince(startOfToday())));
@@ -340,10 +333,10 @@ public final class ApiRoutes {
         body.put("run", runs.snapshot());
         body.put("logFile", logs.logFile().toString());
         body.put("generatedAt", Instant.now());
-        HttpSupport.sendJson(exchange, 200, body);
+        http.sendJson(200, body);
     }
 
-    private void news(HttpExchange exchange, Map<String, String> params) throws IOException {
+    private void news(HttpSupport http, Map<String, String> params) throws IOException {
         int limit = HttpSupport.limitParam(params);
         Long beforeId = HttpSupport.longParam(params, "beforeId");
         String title = likePattern(truncate(HttpSupport.stringParam(params, "title")));
@@ -354,37 +347,37 @@ public final class ApiRoutes {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("items", items);
         body.put("nextBeforeId", nextBeforeId);
-        HttpSupport.sendJson(exchange, 200, body);
+        http.sendJson(200, body);
     }
 
-    private void newsDetail(HttpExchange exchange, String path) throws IOException {
+    private void newsDetail(HttpSupport http, String path) throws IOException {
         long id = parseId(path.substring("/api/news/".length()));
         News news = query(() -> dao.findNews(id));
         if (news == null) {
             throw new ApiException(404, "news not found");
         }
-        HttpSupport.sendJson(exchange, 200, news);
+        http.sendJson(200, news);
     }
 
-    private void pendingLinks(HttpExchange exchange, Map<String, String> params) throws IOException {
+    private void pendingLinks(HttpSupport http, Map<String, String> params) throws IOException {
         int limit = HttpSupport.limitParam(params);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("total", query(dao::countLinksPending));
         body.put("items", query(() -> dao.pendingLinks(limit)));
         body.put("duplicates", query(() -> dao.duplicatePendingLinks(20)));
-        HttpSupport.sendJson(exchange, 200, body);
+        http.sendJson(200, body);
     }
 
-    private void processedLinks(HttpExchange exchange, Map<String, String> params) throws IOException {
+    private void processedLinks(HttpSupport http, Map<String, String> params) throws IOException {
         int limit = HttpSupport.limitParam(params);
         String keyword = likePattern(truncate(HttpSupport.stringParam(params, "q")));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("total", query(dao::countLinksProcessed));
         body.put("items", query(() -> dao.processedLinks(keyword, limit)));
-        HttpSupport.sendJson(exchange, 200, body);
+        http.sendJson(200, body);
     }
 
-    private void logEntries(HttpExchange exchange, Map<String, String> params) throws IOException {
+    private void logEntries(HttpSupport http, Map<String, String> params) throws IOException {
         int limit = HttpSupport.limitParam(params);
         String level = HttpSupport.stringParam(params, "level");
         String query = HttpSupport.stringParam(params, "q");
@@ -393,7 +386,7 @@ public final class ApiRoutes {
         body.put("items", logs.recent(limit, level, query));
         body.put("file", logs.logFile().toString());
         body.put("sizeBytes", logs.size());
-        HttpSupport.sendJson(exchange, 200, body);
+        http.sendJson(200, body);
     }
 
     private void requireGet(String method) {
